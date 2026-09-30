@@ -1,0 +1,643 @@
+-- EERC LMS — MySQL 8+ schema aligned with Laravel migrations + `LmsDemoSeeder`.
+-- Bigint primary keys; stable `public_id` columns for API/SPA (mirrors `lms.service.js`).
+-- `courses.next_module_id` is indexed only (no FK) to allow seed order flexibility.
+-- Import: mysql -u root -p < database/database.mysql
+-- Dummy inserts avoid MySQL-8-only functions (e.g. `RANDOM_BYTES`) so MySQL 5.7 / MariaDB imports work.
+-- Demo login (matches seeder): alex.rivera@eerc.edu / password
+-- Additional rows below are **dummy test data** (extra users, attempts, enrollments, item bank).
+-- No seed rows for `sessions`, `jobs`, `job_batches`, `failed_jobs` (payloads must be valid Laravel structures).
+
+SET NAMES utf8mb4;
+
+CREATE DATABASE IF NOT EXISTS `eerc_lms` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `eerc_lms`;
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS `admin_uploads`;
+DROP TABLE IF EXISTS `leaderboard_entries`;
+DROP TABLE IF EXISTS `enrollments`;
+DROP TABLE IF EXISTS `quiz_attempts`;
+DROP TABLE IF EXISTS `user_module_progress`;
+DROP TABLE IF EXISTS `user_badges`;
+DROP TABLE IF EXISTS `lms_user_profiles`;
+DROP TABLE IF EXISTS `question_options`;
+DROP TABLE IF EXISTS `questions`;
+DROP TABLE IF EXISTS `quizzes`;
+DROP TABLE IF EXISTS `module_resources`;
+DROP TABLE IF EXISTS `modules`;
+DROP TABLE IF EXISTS `course_subject`;
+DROP TABLE IF EXISTS `subjects`;
+DROP TABLE IF EXISTS `course_tag`;
+DROP TABLE IF EXISTS `tags`;
+DROP TABLE IF EXISTS `courses`;
+DROP TABLE IF EXISTS `programs`;
+DROP TABLE IF EXISTS `personal_access_tokens`;
+DROP TABLE IF EXISTS `failed_jobs`;
+DROP TABLE IF EXISTS `job_batches`;
+DROP TABLE IF EXISTS `jobs`;
+DROP TABLE IF EXISTS `cache_locks`;
+DROP TABLE IF EXISTS `cache`;
+DROP TABLE IF EXISTS `sessions`;
+DROP TABLE IF EXISTS `password_reset_tokens`;
+DROP TABLE IF EXISTS `users`;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+CREATE TABLE `users` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_uid` varchar(64) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `email_verified_at` timestamp NULL DEFAULT NULL,
+  `password` varchar(255) NOT NULL,
+  `role` varchar(32) NOT NULL DEFAULT 'student',
+  `remember_token` varchar(100) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `users_public_uid_unique` (`public_uid`),
+  UNIQUE KEY `users_email_unique` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `password_reset_tokens` (
+  `email` varchar(255) NOT NULL,
+  `token` varchar(255) NOT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `sessions` (
+  `id` varchar(255) NOT NULL,
+  `user_id` bigint unsigned DEFAULT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_agent` text,
+  `payload` longtext NOT NULL,
+  `last_activity` int NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `sessions_user_id_index` (`user_id`),
+  KEY `sessions_last_activity_index` (`last_activity`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `cache` (
+  `key` varchar(255) NOT NULL,
+  `value` mediumtext NOT NULL,
+  `expiration` int NOT NULL,
+  PRIMARY KEY (`key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `cache_locks` (
+  `key` varchar(255) NOT NULL,
+  `owner` varchar(255) NOT NULL,
+  `expiration` int NOT NULL,
+  PRIMARY KEY (`key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `jobs` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `queue` varchar(255) NOT NULL,
+  `payload` longtext NOT NULL,
+  `attempts` tinyint unsigned NOT NULL,
+  `reserved_at` int unsigned DEFAULT NULL,
+  `available_at` int unsigned NOT NULL,
+  `created_at` int unsigned NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `jobs_queue_index` (`queue`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `job_batches` (
+  `id` varchar(255) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `total_jobs` int NOT NULL,
+  `pending_jobs` int NOT NULL,
+  `failed_jobs` int NOT NULL,
+  `failed_job_ids` longtext NOT NULL,
+  `options` mediumtext,
+  `cancelled_at` int DEFAULT NULL,
+  `created_at` int NOT NULL,
+  `finished_at` int DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `failed_jobs` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `uuid` varchar(255) NOT NULL,
+  `connection` text NOT NULL,
+  `queue` text NOT NULL,
+  `payload` longtext NOT NULL,
+  `exception` longtext NOT NULL,
+  `failed_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `failed_jobs_uuid_unique` (`uuid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `personal_access_tokens` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `tokenable_type` varchar(255) NOT NULL,
+  `tokenable_id` bigint unsigned NOT NULL,
+  `name` text NOT NULL,
+  `token` varchar(64) NOT NULL,
+  `abilities` text,
+  `last_used_at` timestamp NULL DEFAULT NULL,
+  `expires_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `personal_access_tokens_token_unique` (`token`),
+  KEY `personal_access_tokens_tokenable_type_tokenable_id_index` (`tokenable_type`,`tokenable_id`),
+  KEY `personal_access_tokens_expires_at_index` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `programs` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(64) NOT NULL,
+  `code` varchar(16) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `description` text,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `programs_public_id_unique` (`public_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `courses` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(64) NOT NULL,
+  `program_id` bigint unsigned NOT NULL,
+  `slug` varchar(255) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `mentor_display_name` varchar(255) DEFAULT NULL,
+  `description` text,
+  `level` varchar(64) DEFAULT NULL,
+  `total_modules` smallint unsigned NOT NULL DEFAULT '0',
+  `hours` smallint unsigned NOT NULL DEFAULT '0',
+  `learners_count` int unsigned NOT NULL DEFAULT '0',
+  `next_module_id` bigint unsigned DEFAULT NULL,
+  `video_hours_label` varchar(255) DEFAULT NULL,
+  `preview_completed` tinyint(1) NOT NULL DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `courses_public_id_unique` (`public_id`),
+  UNIQUE KEY `courses_slug_unique` (`slug`),
+  KEY `courses_program_id_foreign` (`program_id`),
+  KEY `courses_next_module_id_index` (`next_module_id`),
+  CONSTRAINT `courses_program_id_foreign` FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `tags` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `tags_name_unique` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `course_tag` (
+  `course_id` bigint unsigned NOT NULL,
+  `tag_id` bigint unsigned NOT NULL,
+  PRIMARY KEY (`course_id`,`tag_id`),
+  KEY `course_tag_tag_id_foreign` (`tag_id`),
+  CONSTRAINT `course_tag_course_id_foreign` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `course_tag_tag_id_foreign` FOREIGN KEY (`tag_id`) REFERENCES `tags` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `subjects` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `subjects_name_unique` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `course_subject` (
+  `course_id` bigint unsigned NOT NULL,
+  `subject_id` bigint unsigned NOT NULL,
+  PRIMARY KEY (`course_id`,`subject_id`),
+  KEY `course_subject_subject_id_foreign` (`subject_id`),
+  CONSTRAINT `course_subject_course_id_foreign` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `course_subject_subject_id_foreign` FOREIGN KEY (`subject_id`) REFERENCES `subjects` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `modules` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(64) NOT NULL,
+  `course_id` bigint unsigned NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `subject` varchar(255) DEFAULT NULL,
+  `topic` varchar(255) DEFAULT NULL,
+  `subtopic` varchar(255) DEFAULT NULL,
+  `learning_flow_step` varchar(64) DEFAULT NULL,
+  `duration_label` varchar(255) DEFAULT NULL,
+  `sort_order` smallint unsigned NOT NULL DEFAULT '0',
+  `is_visible` tinyint(1) NOT NULL DEFAULT '1',
+  `streaming_only` tinyint(1) NOT NULL DEFAULT '0',
+  `summary` text,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `modules_public_id_unique` (`public_id`),
+  KEY `modules_course_id_sort_order_index` (`course_id`,`sort_order`),
+  CONSTRAINT `modules_course_id_foreign` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `module_resources` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `module_id` bigint unsigned NOT NULL,
+  `format` varchar(32) NOT NULL,
+  `sort_order` smallint unsigned NOT NULL DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `module_resources_module_id_sort_order_index` (`module_id`,`sort_order`),
+  CONSTRAINT `module_resources_module_id_foreign` FOREIGN KEY (`module_id`) REFERENCES `modules` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `quizzes` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(64) NOT NULL,
+  `course_id` bigint unsigned NOT NULL,
+  `module_id` bigint unsigned DEFAULT NULL,
+  `title` varchar(255) NOT NULL,
+  `duration_minutes` smallint unsigned NOT NULL DEFAULT '0',
+  `attempts_allowed` tinyint unsigned NOT NULL DEFAULT '1',
+  `question_count` smallint unsigned NOT NULL DEFAULT '0',
+  `question_pool_count` smallint unsigned NOT NULL DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `quizzes_public_id_unique` (`public_id`),
+  KEY `quizzes_course_id_foreign` (`course_id`),
+  KEY `quizzes_module_id_foreign` (`module_id`),
+  CONSTRAINT `quizzes_course_id_foreign` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `quizzes_module_id_foreign` FOREIGN KEY (`module_id`) REFERENCES `modules` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `questions` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `quiz_id` bigint unsigned NOT NULL,
+  `prompt` text NOT NULL,
+  `sort_order` smallint unsigned NOT NULL DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `questions_quiz_id_sort_order_index` (`quiz_id`,`sort_order`),
+  CONSTRAINT `questions_quiz_id_foreign` FOREIGN KEY (`quiz_id`) REFERENCES `quizzes` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `question_options` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `question_id` bigint unsigned NOT NULL,
+  `label` varchar(255) NOT NULL,
+  `is_correct` tinyint(1) NOT NULL DEFAULT '0',
+  `sort_order` smallint unsigned NOT NULL DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `question_options_question_id_foreign` (`question_id`),
+  CONSTRAINT `question_options_question_id_foreign` FOREIGN KEY (`question_id`) REFERENCES `questions` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `lms_user_profiles` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` bigint unsigned NOT NULL,
+  `program_id` bigint unsigned DEFAULT NULL,
+  `streak_days` smallint unsigned NOT NULL DEFAULT '0',
+  `watermark_name` varchar(255) DEFAULT NULL,
+  `session_warning` tinyint(1) NOT NULL DEFAULT '0',
+  `joined_at` date DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `lms_user_profiles_user_id_unique` (`user_id`),
+  KEY `lms_user_profiles_program_id_foreign` (`program_id`),
+  CONSTRAINT `lms_user_profiles_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `lms_user_profiles_program_id_foreign` FOREIGN KEY (`program_id`) REFERENCES `programs` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `user_badges` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` bigint unsigned NOT NULL,
+  `badge_key` varchar(64) NOT NULL,
+  `badge_label` varchar(255) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `user_badges_user_id_badge_key_unique` (`user_id`,`badge_key`),
+  KEY `user_badges_user_id_foreign` (`user_id`),
+  CONSTRAINT `user_badges_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `user_module_progress` (
+  `user_id` bigint unsigned NOT NULL,
+  `module_id` bigint unsigned NOT NULL,
+  `progress_percent` tinyint unsigned NOT NULL DEFAULT '0',
+  `last_position_label` varchar(255) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`user_id`,`module_id`),
+  KEY `user_module_progress_module_id_foreign` (`module_id`),
+  CONSTRAINT `user_module_progress_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `user_module_progress_module_id_foreign` FOREIGN KEY (`module_id`) REFERENCES `modules` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `quiz_attempts` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(64) NOT NULL,
+  `user_id` bigint unsigned NOT NULL,
+  `quiz_id` bigint unsigned NOT NULL,
+  `attempted_on` date NOT NULL,
+  `score` smallint unsigned NOT NULL DEFAULT '0',
+  `duration_used_label` varchar(255) DEFAULT NULL,
+  `correct_answers` smallint unsigned NOT NULL DEFAULT '0',
+  `total_questions` smallint unsigned NOT NULL DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `quiz_attempts_public_id_unique` (`public_id`),
+  KEY `quiz_attempts_user_id_quiz_id_index` (`user_id`,`quiz_id`),
+  KEY `quiz_attempts_quiz_id_foreign` (`quiz_id`),
+  CONSTRAINT `quiz_attempts_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `quiz_attempts_quiz_id_foreign` FOREIGN KEY (`quiz_id`) REFERENCES `quizzes` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `enrollments` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(64) NOT NULL,
+  `user_id` bigint unsigned NOT NULL,
+  `course_id` bigint unsigned NOT NULL,
+  `status` varchar(32) NOT NULL,
+  `submitted_at` date DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `enrollments_public_id_unique` (`public_id`),
+  KEY `enrollments_user_id_course_id_index` (`user_id`,`course_id`),
+  KEY `enrollments_course_id_foreign` (`course_id`),
+  CONSTRAINT `enrollments_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `enrollments_course_id_foreign` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `leaderboard_entries` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `period` varchar(16) NOT NULL,
+  `rank_order` smallint unsigned NOT NULL,
+  `user_id` bigint unsigned DEFAULT NULL,
+  `display_name` varchar(255) DEFAULT NULL,
+  `program_code` varchar(16) DEFAULT NULL,
+  `score` int unsigned NOT NULL DEFAULT '0',
+  `badge_key` varchar(64) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `leaderboard_entries_period_index` (`period`),
+  KEY `leaderboard_entries_period_rank_order_index` (`period`,`rank_order`),
+  KEY `leaderboard_entries_user_id_foreign` (`user_id`),
+  CONSTRAINT `leaderboard_entries_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `admin_uploads` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `public_id` varchar(64) NOT NULL,
+  `user_id` bigint unsigned DEFAULT NULL,
+  `title` varchar(255) NOT NULL,
+  `asset_type` varchar(64) DEFAULT NULL,
+  `status` varchar(64) NOT NULL DEFAULT 'Queued',
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `admin_uploads_public_id_unique` (`public_id`),
+  KEY `admin_uploads_user_id_foreign` (`user_id`),
+  CONSTRAINT `admin_uploads_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET @ts = NOW();
+SET @pwd = '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi';
+
+INSERT INTO `programs` (`id`, `public_id`, `code`, `title`, `description`, `created_at`, `updated_at`) VALUES
+(1, 'program-ce', 'CE', 'Continuing Education', 'A guided board review path with coaching checkpoints and timed practice.', @ts, @ts),
+(2, 'program-plumbing', 'MPL', 'Master Plumbing', 'Licensure preparation focused on design, code review, and field scenarios.', @ts, @ts),
+(3, 'program-materials', 'MSE', 'Materials Engineering', 'Core material behavior, manufacturing processes, and exam-ready drills.', @ts, @ts),
+(4, 'program-environmental-sciences', 'ENV', 'Environmental Sciences', 'Environmental systems, stewardship, and applied science coursework.', @ts, @ts);
+
+INSERT INTO `courses` (`id`, `public_id`, `program_id`, `slug`, `title`, `mentor_display_name`, `description`, `level`, `total_modules`, `hours`, `learners_count`, `next_module_id`, `video_hours_label`, `preview_completed`, `created_at`, `updated_at`) VALUES
+(1, 'course-ce-review', 1, 'ce-board-review', 'CE Board Review', 'Engr. Hannah Cruz', 'Structured review sessions covering hydraulics, structures, and environmental systems.', 'Advanced', 8, 36, 1842, 1, NULL, 0, @ts, @ts),
+(2, 'course-plumbing-mastery', 2, 'master-plumbing-fast-track', 'Master Plumbing Fast Track', 'Engr. Miguel Santos', 'Code interpretation, system sizing, and troubleshooting walkthroughs.', 'Intermediate', 7, 29, 1297, 4, NULL, 0, @ts, @ts),
+(3, 'course-materials-intensive', 3, 'materials-engineering-intensive', 'Materials Engineering Intensive', 'Dr. Reese Navarro', 'Materials characterization, failures, and thermodynamics for exam prep.', 'Advanced', 9, 41, 913, 6, NULL, 0, @ts, @ts),
+(4, 'course-how-to-design-components', 4, 'how-to-design-components-right', 'How to Design Components Right', 'Demo Instructor', 'Learn how to compose interfaces with clarity—from layout grids to typography systems—so learners can absorb content faster.', 'Advanced', 4, 9, 842, 8, '5 hours', 1, @ts, @ts);
+
+INSERT INTO `tags` (`id`, `name`, `created_at`, `updated_at`) VALUES
+(1, 'Streaming only', @ts, @ts),
+(2, 'Board exam', @ts, @ts),
+(3, 'Practice heavy', @ts, @ts),
+(4, 'Case studies', @ts, @ts),
+(5, 'Lab aligned', @ts, @ts),
+(6, 'Coaching', @ts, @ts),
+(7, 'Component systems', @ts, @ts),
+(8, 'UI craft', @ts, @ts);
+
+INSERT INTO `course_tag` (`course_id`, `tag_id`) VALUES (1,1),(1,2),(2,3),(2,4),(3,5),(3,6),(4,7),(4,8);
+
+INSERT INTO `subjects` (`id`, `name`, `created_at`, `updated_at`) VALUES
+(1, 'Hydraulics', @ts, @ts),
+(2, 'Structures', @ts, @ts),
+(3, 'Environmental Engineering', @ts, @ts),
+(4, 'Plumbing Code', @ts, @ts),
+(5, 'Pipe Design', @ts, @ts),
+(6, 'Sanitary Systems', @ts, @ts),
+(7, 'Metallurgy', @ts, @ts),
+(8, 'Thermodynamics', @ts, @ts),
+(9, 'Failure Analysis', @ts, @ts),
+(10, 'UI systems', @ts, @ts),
+(11, 'Layout', @ts, @ts);
+
+INSERT INTO `course_subject` (`course_id`, `subject_id`) VALUES
+(1,1),(1,2),(1,3),(2,4),(2,5),(2,6),(3,7),(3,8),(3,9),(4,10),(4,11);
+
+INSERT INTO `modules` (`id`, `public_id`, `course_id`, `title`, `subject`, `topic`, `subtopic`, `learning_flow_step`, `duration_label`, `sort_order`, `is_visible`, `streaming_only`, `summary`, `created_at`, `updated_at`) VALUES
+(1, 'module-hydraulics-review', 1, 'Hydraulics Review Session', 'Hydraulics', 'Fluid Flow', 'Bernoulli and Energy Losses', 'Review', '42 min', 1, 1, 1, 'Review losses, pressure heads, and exam shortcuts.', @ts, @ts),
+(2, 'module-hydraulics-practice', 1, 'Hydraulics Practice Problems', 'Hydraulics', 'Fluid Flow', 'Pump and Pipeline Problems', 'Practice', '28 min', 2, 1, 1, 'Timed practice set with guided solutions.', @ts, @ts),
+(3, 'module-structural-refresher', 1, 'Structural Refresher', 'Structures', 'Reinforced Concrete', 'Shear and Flexure', 'Refresher', '25 min', 3, 0, 1, 'Formula refresher for high-frequency board questions.', @ts, @ts),
+(4, 'module-pipe-sizing-practice', 2, 'Pipe Sizing Practice', 'Pipe Design', 'Sizing', 'Fixture Units', 'Practice', '35 min', 1, 1, 1, 'Practice scenarios for domestic and sanitary systems.', @ts, @ts),
+(5, 'module-code-final-coaching', 2, 'Code Review Final Coaching', 'Plumbing Code', 'Compliance', 'Inspection and Exceptions', 'Final Coaching', '48 min', 2, 1, 1, 'Instructor-led final coaching before mock exam day.', @ts, @ts),
+(6, 'module-heat-treatment-refresher', 3, 'Heat Treatment Refresher', 'Metallurgy', 'Heat Treatment', 'Phase Transformation', 'Refresher', '32 min', 1, 1, 1, 'Fast review of heat treatment charts and material response.', @ts, @ts),
+(7, 'module-design-01-foundations', 4, 'Foundations & composition', 'UI systems', 'Layout', 'Hierarchy and rhythm', 'Review', '2h 10m', 1, 1, 0, 'Contrast, spacing, and grid principles for teachable screens.', @ts, @ts),
+(8, 'module-design-02-layout-systems', 4, 'Layout systems & modules', 'UI systems', 'Layout', 'Modular UI', 'Practice', '2h 25m', 2, 1, 0, 'Break pages into reusable regions and responsive columns.', @ts, @ts),
+(9, 'module-design-03-typography', 4, 'Typography & affordance', 'UI systems', 'Type', 'Scale and emphasis', 'Refresher', '2h 15m', 3, 1, 0, 'Readable type ramps, links, and states that guide attention.', @ts, @ts),
+(10, 'module-design-04-critique', 4, 'Critique & handoff', 'UI systems', 'Process', 'Review cadence', 'Final Coaching', '2h 10m', 4, 1, 0, 'Structured feedback loops before implementation.', @ts, @ts);
+
+INSERT INTO `module_resources` (`module_id`, `format`, `sort_order`, `created_at`, `updated_at`) VALUES
+(1, 'Video', 0, @ts, @ts),(1, 'PDF', 1, @ts, @ts),(1, 'eBook', 2, @ts, @ts),
+(2, 'Video', 0, @ts, @ts),(2, 'PDF', 1, @ts, @ts),
+(3, 'PDF', 0, @ts, @ts),(3, 'eBook', 1, @ts, @ts),
+(4, 'Video', 0, @ts, @ts),(4, 'PDF', 1, @ts, @ts),
+(5, 'Video', 0, @ts, @ts),(5, 'eBook', 1, @ts, @ts),
+(6, 'Video', 0, @ts, @ts),(6, 'PDF', 1, @ts, @ts),(6, 'eBook', 2, @ts, @ts),
+(7, 'Video', 0, @ts, @ts),(7, 'PDF', 1, @ts, @ts),
+(8, 'Video', 0, @ts, @ts),(8, 'PDF', 1, @ts, @ts),(8, 'eBook', 2, @ts, @ts),
+(9, 'Video', 0, @ts, @ts),(9, 'PDF', 1, @ts, @ts),
+(10, 'Video', 0, @ts, @ts),(10, 'PDF', 1, @ts, @ts);
+
+INSERT INTO `quizzes` (`id`, `public_id`, `course_id`, `module_id`, `title`, `duration_minutes`, `attempts_allowed`, `question_count`, `question_pool_count`, `created_at`, `updated_at`) VALUES
+(1, 'quiz-hydraulics-timed', 1, 1, 'Hydraulics Timed Quiz', 20, 3, 20, 80, @ts, @ts),
+(2, 'quiz-plumbing-code', 2, 5, 'Plumbing Code Quiz', 15, 4, 15, 48, @ts, @ts),
+(3, 'quiz-design-layout-check', 4, 8, 'Layout systems check-in', 12, 3, 10, 24, @ts, @ts),
+(4, 'quiz-design-critique', 4, 10, 'Critique readiness quiz', 10, 3, 8, 20, @ts, @ts);
+
+INSERT INTO `users` (`id`, `public_uid`, `name`, `email`, `email_verified_at`, `password`, `role`, `remember_token`, `created_at`, `updated_at`) VALUES
+(1, 'learner-01', 'Alex E. Rivera', 'alex.rivera@eerc.edu', @ts, @pwd, 'admin', NULL, @ts, @ts),
+(2, 'eerc-demo-student-user', 'Mina Santos', 'mina@demo.edu', @ts, @pwd, 'student', NULL, @ts, @ts),
+(3, 'eerc-demo-instructor-user', 'Dr. Reese Navarro', 'reese@demo.edu', @ts, @pwd, 'instructor', NULL, @ts, @ts);
+
+INSERT INTO `lms_user_profiles` (`user_id`, `program_id`, `streak_days`, `watermark_name`, `session_warning`, `joined_at`, `created_at`, `updated_at`) VALUES
+(1, 1, 14, 'Alex E. Rivera', 1, '2026-01-12', @ts, @ts),
+(2, 2, 0, 'Mina Santos', 0, '2026-02-01', @ts, @ts),
+(3, 3, 0, 'Dr. Reese Navarro', 0, '2025-11-15', @ts, @ts);
+
+INSERT INTO `user_badges` (`user_id`, `badge_key`, `badge_label`, `created_at`, `updated_at`) VALUES
+(1, 'top10', 'Top 10', @ts, @ts),
+(1, 'consistency', 'Consistency', @ts, @ts);
+
+INSERT INTO `user_module_progress` (`user_id`, `module_id`, `progress_percent`, `last_position_label`, `created_at`, `updated_at`) VALUES
+(1, 1, 74, '31:10', @ts, @ts),
+(1, 2, 0, '00:00', @ts, @ts),
+(1, 3, 52, '12:44', @ts, @ts),
+(1, 4, 33, '09:30', @ts, @ts),
+(1, 5, 0, '00:00', @ts, @ts),
+(1, 6, 58, '16:25', @ts, @ts),
+(1, 7, 100, '00:00', @ts, @ts),
+(1, 8, 100, '00:00', @ts, @ts),
+(1, 9, 100, '00:00', @ts, @ts),
+(1, 10, 100, '00:00', @ts, @ts);
+
+INSERT INTO `quiz_attempts` (`public_id`, `user_id`, `quiz_id`, `attempted_on`, `score`, `duration_used_label`, `correct_answers`, `total_questions`, `created_at`, `updated_at`) VALUES
+('attempt-001', 1, 1, '2026-04-20', 84, '16m 10s', 17, 20, @ts, @ts),
+('attempt-002', 1, 1, '2026-04-22', 88, '14m 55s', 18, 20, @ts, @ts),
+('attempt-003', 1, 2, '2026-04-19', 76, '11m 37s', 11, 15, @ts, @ts);
+
+INSERT INTO `enrollments` (`public_id`, `user_id`, `course_id`, `status`, `submitted_at`, `created_at`, `updated_at`) VALUES
+('enrollment-001', 1, 1, 'approved', '2026-04-10', @ts, @ts),
+('enrollment-002', 1, 3, 'pending', '2026-04-21', @ts, @ts);
+
+INSERT INTO `leaderboard_entries` (`period`, `rank_order`, `user_id`, `display_name`, `program_code`, `score`, `badge_key`, `created_at`, `updated_at`) VALUES
+('daily', 1, 1, 'Alex E. Rivera', 'CE', 985, 'top10', @ts, @ts),
+('daily', 2, NULL, 'Mina Santos', 'MPL', 960, 'mostImproved', @ts, @ts),
+('daily', 3, NULL, 'Caleb Lim', 'MSE', 931, 'consistency', @ts, @ts),
+('weekly', 1, NULL, 'Mina Santos', 'MPL', 6720, 'top10', @ts, @ts),
+('weekly', 2, 1, 'Alex E. Rivera', 'CE', 6550, 'consistency', @ts, @ts),
+('weekly', 3, NULL, 'Jiro Tan', 'MSE', 6430, 'mostImproved', @ts, @ts),
+('overall', 1, 1, 'Alex E. Rivera', 'CE', 31220, 'top10', @ts, @ts),
+('overall', 2, NULL, 'Diane Uy', 'MPL', 30110, 'top10', @ts, @ts),
+('overall', 3, NULL, 'Mina Santos', 'MPL', 29440, 'mostImproved', @ts, @ts);
+
+INSERT INTO `admin_uploads` (`public_id`, `user_id`, `title`, `asset_type`, `status`, `created_at`, `updated_at`) VALUES
+('upload-1', 1, 'Hydraulics Solution Manual', 'PDF', 'Published', @ts, @ts);
+
+INSERT INTO `users` (`id`, `public_uid`, `name`, `email`, `email_verified_at`, `password`, `role`, `remember_token`, `created_at`, `updated_at`) VALUES
+(4, 'test-learner-caleb', 'Caleb Lim', 'caleb.lim@test.eerc.edu', @ts, @pwd, 'student', NULL, @ts, @ts),
+(5, 'test-learner-jiro', 'Jiro Tan', 'jiro.tan@test.eerc.edu', @ts, @pwd, 'student', NULL, @ts, @ts),
+(6, 'test-instructor-diane', 'Diane Uy', 'diane.uy@test.eerc.edu', @ts, @pwd, 'instructor', NULL, @ts, @ts),
+(7, 'test-admin-sam', 'Sam Okonkwo', 'sam.okonkwo@test.eerc.edu', @ts, @pwd, 'admin', NULL, @ts, @ts),
+(8, 'test-learner-priya', 'Priya Nair', 'priya.nair@test.eerc.edu', @ts, @pwd, 'student', NULL, @ts, @ts);
+
+INSERT INTO `lms_user_profiles` (`user_id`, `program_id`, `streak_days`, `watermark_name`, `session_warning`, `joined_at`, `created_at`, `updated_at`) VALUES
+(4, 3, 3, 'Caleb Lim', 0, '2026-03-01', @ts, @ts),
+(5, 3, 7, 'Jiro Tan', 0, '2026-02-14', @ts, @ts),
+(6, 2, 0, 'Diane Uy', 0, '2025-09-01', @ts, @ts),
+(7, 1, 2, 'Sam Okonkwo', 1, '2026-01-20', @ts, @ts),
+(8, 2, 21, 'Priya Nair', 0, '2025-12-10', @ts, @ts);
+
+INSERT INTO `user_badges` (`user_id`, `badge_key`, `badge_label`, `created_at`, `updated_at`) VALUES
+(2, 'mostImproved', 'Most Improved', @ts, @ts),
+(4, 'consistency', 'Consistency', @ts, @ts),
+(5, 'top10', 'Top 10', @ts, @ts),
+(8, 'top10', 'Top 10', @ts, @ts),
+(8, 'mostImproved', 'Most Improved', @ts, @ts);
+
+INSERT INTO `user_module_progress` (`user_id`, `module_id`, `progress_percent`, `last_position_label`, `created_at`, `updated_at`) VALUES
+(2, 1, 15, '08:20', @ts, @ts),
+(2, 4, 100, '35:00', @ts, @ts),
+(2, 7, 45, '55:00', @ts, @ts),
+(3, 6, 80, '24:10', @ts, @ts),
+(3, 7, 100, '2h 10m', @ts, @ts),
+(4, 1, 100, '42:00', @ts, @ts),
+(4, 2, 40, '11:00', @ts, @ts),
+(5, 6, 25, '08:00', @ts, @ts),
+(8, 4, 12, '04:00', @ts, @ts),
+(8, 5, 0, '00:00', @ts, @ts);
+
+INSERT INTO `quiz_attempts` (`public_id`, `user_id`, `quiz_id`, `attempted_on`, `score`, `duration_used_label`, `correct_answers`, `total_questions`, `created_at`, `updated_at`) VALUES
+('attempt-004', 2, 3, '2026-04-25', 70, '9m 12s', 7, 10, @ts, @ts),
+('attempt-005', 2, 4, '2026-04-26', 62, '7m 45s', 5, 8, @ts, @ts),
+('attempt-006', 4, 1, '2026-04-18', 95, '18m 20s', 19, 20, @ts, @ts),
+('attempt-007', 5, 1, '2026-04-17', 72, '17m 00s', 14, 20, @ts, @ts),
+('attempt-008', 8, 2, '2026-04-24', 60, '12m 30s', 9, 15, @ts, @ts),
+('attempt-009', 1, 3, '2026-04-27', 90, '10m 05s', 9, 10, @ts, @ts),
+('attempt-010', 1, 4, '2026-04-28', 100, '8m 30s', 8, 8, @ts, @ts);
+
+INSERT INTO `enrollments` (`public_id`, `user_id`, `course_id`, `status`, `submitted_at`, `created_at`, `updated_at`) VALUES
+('enrollment-003', 2, 2, 'approved', '2026-03-15', @ts, @ts),
+('enrollment-004', 2, 4, 'pending', '2026-04-26', @ts, @ts),
+('enrollment-005', 3, 1, 'approved', '2026-01-05', @ts, @ts),
+('enrollment-006', 4, 1, 'rejected', '2026-02-01', @ts, @ts),
+('enrollment-007', 5, 3, 'pending', '2026-04-29', @ts, @ts),
+('enrollment-008', 8, 2, 'approved', '2026-03-20', @ts, @ts),
+('enrollment-009', 7, 4, 'pending', NULL, @ts, @ts);
+
+INSERT INTO `leaderboard_entries` (`period`, `rank_order`, `user_id`, `display_name`, `program_code`, `score`, `badge_key`, `created_at`, `updated_at`) VALUES
+('daily', 4, 4, 'Caleb Lim', 'MSE', 905, 'consistency', @ts, @ts),
+('daily', 5, 8, 'Priya Nair', 'MPL', 888, 'top10', @ts, @ts),
+('weekly', 4, 5, 'Jiro Tan', 'MSE', 6200, 'mostImproved', @ts, @ts),
+('weekly', 5, 8, 'Priya Nair', 'MPL', 6050, 'top10', @ts, @ts),
+('overall', 4, 6, 'Diane Uy', 'MPL', 28200, 'consistency', @ts, @ts),
+('overall', 5, 5, 'Jiro Tan', 'MSE', 27100, 'mostImproved', @ts, @ts);
+
+INSERT INTO `admin_uploads` (`public_id`, `user_id`, `title`, `asset_type`, `status`, `created_at`, `updated_at`) VALUES
+('upload-test-02', 3, 'Plumbing Code Quick Reference', 'PDF', 'Processing', @ts, @ts),
+('upload-test-03', 2, 'Practice Exam Pack A', 'ZIP', 'Queued', @ts, @ts),
+('upload-test-04', 6, 'Lab Safety Checklist', 'PDF', 'Published', @ts, @ts),
+('upload-test-05', NULL, 'Bulk ingest: legacy videos', 'Video', 'Failed', @ts, @ts),
+('upload-test-06', 7, 'Admin policy draft v2', 'DOCX', 'Queued', @ts, @ts);
+
+INSERT INTO `questions` (`id`, `quiz_id`, `prompt`, `sort_order`, `created_at`, `updated_at`) VALUES
+(1, 1, 'In steady inviscid flow along a streamline, which relation is the core of the Bernoulli equation?', 0, @ts, @ts),
+(2, 1, 'Head loss in a pipe is primarily associated with which effect?', 1, @ts, @ts),
+(3, 1, 'A pump adds energy to the fluid in the form of:', 2, @ts, @ts),
+(4, 2, 'The maximum spacing of sanitary cleanouts along a horizontal drain is typically governed by:', 0, @ts, @ts),
+(5, 3, 'A consistent layout grid helps primarily with:', 0, @ts, @ts);
+
+INSERT INTO `question_options` (`id`, `question_id`, `label`, `is_correct`, `sort_order`, `created_at`, `updated_at`) VALUES
+(1, 1, 'Pressure + velocity head + elevation head is constant (energy per unit weight)', 1, 0, @ts, @ts),
+(2, 1, 'Flow rate always doubles when diameter doubles', 0, 1, @ts, @ts),
+(3, 1, 'Static pressure is always highest at the free surface', 0, 2, @ts, @ts),
+(4, 1, 'Viscosity dominates all head changes', 0, 3, @ts, @ts),
+(5, 2, 'Friction and minor losses along the run', 1, 0, @ts, @ts),
+(6, 2, 'Only elevation changes', 0, 1, @ts, @ts),
+(7, 2, 'Temperature gradients alone', 0, 2, @ts, @ts),
+(8, 2, 'Pipe color coding', 0, 3, @ts, @ts),
+(9, 3, 'Increased mechanical energy (head) to overcome losses and lift', 1, 0, @ts, @ts),
+(10, 3, 'Reduced density only', 0, 1, @ts, @ts),
+(11, 3, 'Removal of boundary layers', 0, 2, @ts, @ts),
+(12, 3, 'Chemical treatment', 0, 3, @ts, @ts),
+(13, 4, 'Code tables and local amendments for the jurisdiction', 1, 0, @ts, @ts),
+(14, 4, 'Fixture finish schedules only', 0, 1, @ts, @ts),
+(15, 4, 'Roof pitch exclusively', 0, 2, @ts, @ts),
+(16, 4, 'Ceiling tile dimensions', 0, 3, @ts, @ts),
+(17, 5, 'Alignment, predictable spacing, and scalable composition', 1, 0, @ts, @ts),
+(18, 5, 'Using as many font families as possible', 0, 1, @ts, @ts),
+(19, 5, 'Avoiding all grid constraints', 0, 2, @ts, @ts),
+(20, 5, 'Random breakpoints per component', 0, 3, @ts, @ts);
+
+INSERT INTO `password_reset_tokens` (`email`, `token`, `created_at`) VALUES
+('test-password-reset@eerc.edu', CONCAT('dummy-reset-', REPLACE(UUID(), '-', '')), @ts);
+
+INSERT INTO `cache` (`key`, `value`, `expiration`) VALUES
+('lms_demo_cache_flag', 'i:1;', UNIX_TIMESTAMP() + 3600);
+
+INSERT INTO `cache_locks` (`key`, `owner`, `expiration`) VALUES
+('lms_demo_lock', 'lms-demo-owner', UNIX_TIMESTAMP() + 120);
+
+INSERT INTO `personal_access_tokens` (`tokenable_type`, `tokenable_id`, `name`, `token`, `abilities`, `last_used_at`, `expires_at`, `created_at`, `updated_at`) VALUES
+('App\\Models\\User', 1, 'demo-api-token', SHA2(CONCAT(UUID(), RAND(), NOW(6)), 256), '["*"]', NULL, NULL, @ts, @ts);
