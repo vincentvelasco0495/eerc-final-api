@@ -4,6 +4,9 @@
 /public/build
 /public/hot
 /public/storage
+/public/cms-videos/*
+!/public/cms-videos/.gitkeep
+!/public/cms-videos/.htaccess
 /storage/*.key
 /storage/pail
 /vendor

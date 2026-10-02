@@ -11,6 +11,8 @@ class PublicStorageController extends Controller
 {
     public function show(Request $request)
     {
+        set_time_limit(0);
+
         $validated = $request->validate([
             'path' => ['required', 'string', 'max:2048'],
         ]);
@@ -18,6 +20,16 @@ class PublicStorageController extends Controller
         $path = $this->normalizeIncomingPath((string) $validated['path']);
         if ($path === '' || str_contains($path, '..')) {
             abort(404, 'File not found.');
+        }
+
+        $basename = basename($path);
+        if (preg_match('/\.(mp4|webm|ogg)$/i', $basename)) {
+            $webPath = public_path('cms-videos/'.$basename);
+            if (is_file($webPath) && is_readable($webPath)) {
+                $mime = (string) (@mime_content_type($webPath) ?: 'video/mp4');
+
+                return RangedFileResponse::make($webPath, $mime, true, $basename);
+            }
         }
 
         $public = Storage::disk('public');
@@ -61,11 +73,17 @@ class PublicStorageController extends Controller
 
     private function isProtectedLessonVideo(string $path, string $mime): bool
     {
+        $normalized = str_replace('\\', '/', $path);
+        // Homepage sample lectures and other CMS assets are meant to play publicly.
+        if (str_starts_with($normalized, 'cms/')) {
+            return false;
+        }
+
         if (str_starts_with(strtolower($mime), 'video/')) {
             return true;
         }
 
-        return str_contains(str_replace('\\', '/', $path), 'lesson-materials/videos/');
+        return str_contains($normalized, 'lesson-materials/videos/');
     }
 
     private function normalizeIncomingPath(string $raw): string

@@ -53,8 +53,22 @@ class CmsMediaUploadController extends Controller
             return response()->json(['message' => 'Media not found.'], 404);
         }
 
-        if ($media->disk && $media->path && Storage::disk($media->disk)->exists($media->path)) {
-            Storage::disk($media->disk)->delete($media->path);
+        if ($media->disk && $media->path) {
+            try {
+                if (Storage::disk($media->disk)->exists($media->path)) {
+                    Storage::disk($media->disk)->delete($media->path);
+                }
+            } catch (\Throwable) {
+                /* disk may be missing on older rows */
+            }
+        }
+
+        $filename = basename((string) ($media->filename ?: $media->path));
+        if ($filename !== '') {
+            $webPath = public_path('cms-videos/'.$filename);
+            if (is_file($webPath)) {
+                @unlink($webPath);
+            }
         }
 
         $media->delete();
@@ -64,23 +78,44 @@ class CmsMediaUploadController extends Controller
 
     public function file(string $publicId)
     {
+        set_time_limit(0);
+
         $media = CmsMedia::query()->where('public_id', $publicId)->first();
 
-        if ($media === null || ! $media->disk || ! $media->path) {
+        if ($media === null || ! $media->path) {
             abort(404, 'Media not found.');
         }
 
-        $disk = Storage::disk($media->disk);
-        if (! $disk->exists($media->path)) {
-            abort(404, 'Media file not found.');
+        $filename = basename((string) ($media->filename ?: $media->path));
+        $candidates = [
+            public_path('cms-videos/'.$filename),
+            public_path('storage/cms/homepage-v2/'.$filename),
+            storage_path('app/public/cms/homepage-v2/'.$filename),
+            storage_path('app/private/cms/homepage-v2/'.$filename),
+        ];
+        if ($media->disk) {
+            try {
+                $disk = Storage::disk($media->disk);
+                if ($disk->exists($media->path)) {
+                    array_unshift($candidates, $disk->path($media->path));
+                }
+            } catch (\Throwable) {
+                /* unknown disk name on older rows */
+            }
         }
 
-        return RangedFileResponse::make(
-            $disk->path($media->path),
-            $media->mime ?: 'application/octet-stream',
-            true,
-            $media->original_name,
-        );
+        foreach ($candidates as $absolutePath) {
+            if (is_file($absolutePath) && is_readable($absolutePath)) {
+                return RangedFileResponse::make(
+                    $absolutePath,
+                    $media->mime ?: 'video/mp4',
+                    true,
+                    $media->original_name ?: $filename
+                );
+            }
+        }
+
+        abort(404, 'Media file not found.');
     }
 
     /**

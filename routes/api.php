@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\LmsLeaderboardController;
 use App\Http\Controllers\Api\LmsMetaController;
 use App\Http\Controllers\Api\LmsInstructorController;
 use App\Http\Controllers\Api\LmsStudentController;
+use App\Http\Controllers\CmsVideoFileController;
 use App\Http\Controllers\Api\PublicStorageController;
 use App\Http\Controllers\Api\LmsProgramController;
 use App\Http\Controllers\Api\LmsBatchEnrollController;
@@ -79,6 +80,8 @@ Route::get('/contact-page', [ContactPageContentController::class, 'show']);
 Route::get('/payment-methods', [PaymentMethodController::class, 'index']);
 Route::get('/media/{publicId}/file', [CmsMediaUploadController::class, 'file']);
 Route::get('/public-storage/file', [PublicStorageController::class, 'show']);
+Route::get('/cms-videos/{filename}', [CmsVideoFileController::class, 'show'])
+    ->where('filename', '[A-Za-z0-9._-]+');
 Route::get('/lesson-materials/{publicId}/file', [LmsLessonMaterialController::class, 'download']);
 
 Route::middleware('throttle:10,1')->post('/contact-feedback', [ContactFeedbackController::class, 'store']);

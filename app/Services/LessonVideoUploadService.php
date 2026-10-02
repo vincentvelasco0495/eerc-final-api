@@ -69,6 +69,8 @@ class LessonVideoUploadService
 
     public function storeChunk(User $user, string $uploadId, int $index, UploadedFile $chunk): array
     {
+        set_time_limit(0);
+
         $meta = $this->loadOwnedMeta($user, $uploadId);
         $total = (int) $meta['total_chunks'];
         $chunkSize = (int) $meta['chunk_size'];
@@ -86,12 +88,12 @@ class LessonVideoUploadService
             abort(422, 'Chunk size does not match the upload session.');
         }
 
-        $partRel = $this->partPath($uploadId, $index);
-        Storage::disk('local')->putFileAs($this->partsDir($uploadId), $chunk, (string) $index);
-
-        if (! Storage::disk('local')->exists($partRel)) {
-            abort(500, 'Could not store video chunk.');
+        $source = $chunk->getRealPath() ?: $chunk->getPathname();
+        if (! is_string($source) || $source === '' || ! is_readable($source)) {
+            abort(500, 'Could not read the uploaded video chunk.');
         }
+
+        $this->writeChunkAtOffset($uploadId, $index, $chunkSize, $source, $actual);
 
         $meta = $this->mutateMeta($uploadId, function (array $current) use ($index) {
             $received = array_values(array_unique(array_map('intval', $current['received'] ?? [])));
@@ -117,7 +119,7 @@ class LessonVideoUploadService
         $received = array_map('intval', $meta['received'] ?? []);
         $missing = [];
         for ($i = 0; $i < $total; $i++) {
-            if (! in_array($i, $received, true) || ! Storage::disk('local')->exists($this->partPath($uploadId, $i))) {
+            if (! in_array($i, $received, true)) {
                 $missing[] = $i;
             }
         }
@@ -143,7 +145,7 @@ class LessonVideoUploadService
         $destRel = 'lesson-materials/videos/'.$uploadId.'.'.$ext;
         Storage::disk('local')->makeDirectory('lesson-materials/videos');
         $destAbs = Storage::disk('local')->path($destRel);
-        $this->assembleChunks($uploadId, $total, $destAbs, (int) $meta['size_bytes']);
+        $this->finalizeAssembledFile($uploadId, $total, $destAbs, (int) $meta['size_bytes']);
 
         $mime = $this->detectVideoMime($destAbs, (string) $meta['mime']);
 
@@ -168,25 +170,32 @@ class LessonVideoUploadService
     public function abort(User $user, string $uploadId): void
     {
         $this->loadOwnedMeta($user, $uploadId);
+        $cmsPartial = public_path('cms-videos/'.$uploadId.'.partial');
+        if (is_file($cmsPartial)) {
+            @unlink($cmsPartial);
+        }
         $this->deleteSession($uploadId);
     }
 
     protected function completeAsCmsMedia(User $user, string $uploadId, array $meta, int $total, string $ext): CmsMedia
     {
         $filename = $uploadId.'.'.$ext;
-        $destRel = 'cms/homepage-v2/'.$filename;
-        Storage::disk('public')->makeDirectory('cms/homepage-v2');
-        $destAbs = Storage::disk('public')->path($destRel);
-        $this->assembleChunks($uploadId, $total, $destAbs, (int) $meta['size_bytes']);
+        $destAbs = $this->cmsPublicAbsolutePath($filename);
+        $this->finalizeAssembledFile($uploadId, $total, $destAbs, (int) $meta['size_bytes']);
+
+        if (! is_file($destAbs) || ! is_readable($destAbs)) {
+            abort(500, 'Sample lecture was uploaded but could not be saved to public storage.');
+        }
 
         $mime = $this->detectVideoMime($destAbs, (string) $meta['mime']);
-        $url = '/storage/'.ltrim($destRel, '/');
+        $url = '/cms-videos/'.$filename;
+        $usesWebRoot = realpath(dirname($destAbs)) === realpath(public_path('cms-videos'));
 
         $media = CmsMedia::query()->create([
             'public_id' => 'media-'.Str::lower((string) Str::ulid()),
             'uploaded_by' => $user->id > 0 ? $user->id : null,
-            'disk' => 'public',
-            'path' => $destRel,
+            'disk' => $usesWebRoot ? 'cms_web' : 'public',
+            'path' => $usesWebRoot ? $filename : 'cms/homepage-v2/'.$filename,
             'url' => $url,
             'filename' => $filename,
             'original_name' => (string) $meta['original_name'],
@@ -198,6 +207,116 @@ class LessonVideoUploadService
         $this->deleteSession($uploadId);
 
         return $media->fresh();
+    }
+
+    protected function writeChunkAtOffset(string $uploadId, int $index, int $chunkSize, string $source, int $expectedBytes): void
+    {
+        $partialAbs = $this->partialAbsolutePath($uploadId);
+        $dir = dirname($partialAbs);
+        if (! is_dir($dir) && ! mkdir($dir, 0775, true) && ! is_dir($dir)) {
+            abort(500, 'Could not create video storage directory.');
+        }
+
+        $out = fopen($partialAbs, 'c+b');
+        if ($out === false) {
+            abort(500, 'Could not store video chunk.');
+        }
+
+        try {
+            flock($out, LOCK_EX);
+            if (fseek($out, $index * $chunkSize) !== 0) {
+                abort(500, 'Could not store video chunk.');
+            }
+            $in = fopen($source, 'rb');
+            if ($in === false) {
+                abort(500, 'Could not read the uploaded video chunk.');
+            }
+            $copied = stream_copy_to_stream($in, $out);
+            fclose($in);
+            fflush($out);
+            flock($out, LOCK_UN);
+        } finally {
+            fclose($out);
+        }
+
+        if ((int) $copied !== $expectedBytes) {
+            abort(500, 'Could not store video chunk.');
+        }
+    }
+
+    /**
+     * Prefer the in-place assembled file (no second 250MB copy). Fall back to
+     * concatenating legacy per-chunk part files from older upload sessions.
+     */
+    protected function finalizeAssembledFile(string $uploadId, int $total, string $destAbs, int $expectedSize): void
+    {
+        $partialAbs = $this->partialAbsolutePath($uploadId);
+        clearstatcache(true, $partialAbs);
+        if (is_file($partialAbs) && (int) filesize($partialAbs) === $expectedSize) {
+            $this->moveAssembledTo($partialAbs, $destAbs, $expectedSize);
+
+            return;
+        }
+
+        $this->assembleChunks($uploadId, $total, $destAbs, $expectedSize);
+    }
+
+    protected function moveAssembledTo(string $fromAbs, string $toAbs, int $expectedSize): void
+    {
+        $dir = dirname($toAbs);
+        if (! is_dir($dir) && ! mkdir($dir, 0775, true) && ! is_dir($dir)) {
+            abort(500, 'Could not create video storage directory.');
+        }
+        if (is_file($toAbs) && realpath($fromAbs) !== realpath($toAbs)) {
+            @unlink($toAbs);
+        }
+        if (! @rename($fromAbs, $toAbs) && ! @copy($fromAbs, $toAbs)) {
+            abort(500, 'Could not store the assembled video.');
+        }
+        if (is_file($fromAbs) && realpath($fromAbs) !== realpath($toAbs)) {
+            @unlink($fromAbs);
+        }
+        clearstatcache(true, $toAbs);
+        $assembledSize = is_file($toAbs) ? (int) filesize($toAbs) : 0;
+        if ($assembledSize !== $expectedSize) {
+            @unlink($toAbs);
+            abort(500, 'Assembled video size does not match the original file.');
+        }
+    }
+
+    protected function partialAbsolutePath(string $uploadId): string
+    {
+        $meta = $this->readMeta($uploadId);
+        if (($meta['target_kind'] ?? '') === 'cms') {
+            $dir = public_path('cms-videos');
+            if (! is_dir($dir) && ! mkdir($dir, 0775, true) && ! is_dir($dir)) {
+                abort(500, 'Could not create video storage directory.');
+            }
+
+            return $dir.DIRECTORY_SEPARATOR.$uploadId.'.partial';
+        }
+
+        return Storage::disk('local')->path($this->partialPath($uploadId));
+    }
+
+    protected function cmsPublicAbsolutePath(string $filename): string
+    {
+        $webDir = public_path('cms-videos');
+        if (! is_dir($webDir)) {
+            @mkdir($webDir, 0775, true);
+        }
+        if (is_dir($webDir) && is_writable($webDir)) {
+            return $webDir.DIRECTORY_SEPARATOR.$filename;
+        }
+
+        Storage::disk('public')->makeDirectory('cms/homepage-v2');
+
+        return Storage::disk('public')->path('cms/homepage-v2/'.$filename);
+    }
+
+    protected function partialPath(string $uploadId): string
+    {
+        return 'video-uploads/'.$uploadId.'/assembled.partial';
     }
 
     protected function assembleChunks(string $uploadId, int $total, string $destAbs, int $expectedSize): void
@@ -321,6 +440,11 @@ class LessonVideoUploadService
             }
             $mtime = Storage::disk('local')->lastModified($metaRel);
             if (is_int($mtime) && $mtime < $cutoff) {
+                $staleId = basename(str_replace('\\', '/', $dir));
+                $cmsPartial = public_path('cms-videos/'.$staleId.'.partial');
+                if (is_file($cmsPartial)) {
+                    @unlink($cmsPartial);
+                }
                 Storage::disk('local')->deleteDirectory($dir);
             }
         }
@@ -392,6 +516,10 @@ class LessonVideoUploadService
 
     protected function deleteSession(string $id): void
     {
+        $cmsPartial = public_path('cms-videos/'.$id.'.partial');
+        if (is_file($cmsPartial)) {
+            @unlink($cmsPartial);
+        }
         Storage::disk('local')->deleteDirectory('video-uploads/'.$id);
     }
 

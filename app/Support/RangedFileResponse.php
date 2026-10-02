@@ -20,13 +20,16 @@ class RangedFileResponse
         bool $inline = true,
         ?string $downloadName = null,
         ?string $accelRelativePath = null,
+        bool $publicCache = false,
     ): BinaryFileResponse|\Illuminate\Http\Response {
         if (! is_file($absolutePath) || ! is_readable($absolutePath)) {
             abort(404, 'File missing on storage.');
         }
 
         $isVideo = str_starts_with(strtolower($mime), 'video/');
-        $cacheControl = $inline && $isVideo ? 'private, no-store' : 'public, max-age=86400';
+        $cacheControl = $publicCache || ! ($inline && $isVideo)
+            ? 'public, max-age=86400'
+            : 'private, no-store';
 
         $accelPrefix = trim((string) config('lms.video.accel_redirect', ''));
         if ($accelPrefix !== '' && is_string($accelRelativePath) && trim($accelRelativePath) !== '') {
@@ -52,7 +55,7 @@ class RangedFileResponse
         ];
 
         $disposition = $inline ? 'inline' : 'attachment';
-        $response = new BinaryFileResponse($absolutePath, 200, $headers, true, $disposition);
+        $response = new BinaryFileResponse($absolutePath, 200, $headers, $publicCache, $disposition);
         if (is_string($downloadName) && trim($downloadName) !== '') {
             $response->setContentDisposition($disposition, $downloadName);
         }

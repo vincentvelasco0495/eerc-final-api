@@ -1,0 +1,5 @@
+<IfModule mod_headers.c>
+    Header set Accept-Ranges bytes
+    Header set Cache-Control "public, max-age=86400"
+    Header set Access-Control-Expose-Headers "Accept-Ranges, Content-Range, Content-Length, Content-Type"
+</IfModule>
