@@ -6,7 +6,7 @@ return [
     'allowed_methods' => ['*'],
 
     'allowed_origins' => [
-        'https://eerc-v2.netlify.app',
+        'https://eerc-final.netlify.app',
     ],
 
     'allowed_origins_patterns' => [],
