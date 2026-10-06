@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\Concerns\ResolvesLmsActor;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\LmsCatalogService;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -38,6 +40,36 @@ class LmsEnrollmentPaymentController extends Controller
 
         return response()->json(
             $catalog->enrollmentPaymentsPaginated($page, $perPage, $search, $verification)
+        );
+    }
+
+    public function export(Request $request, LmsCatalogService $catalog)
+    {
+        $actor = $this->lmsActor();
+        if ($actor->id <= 0) {
+            abort(401, 'Authentication required.');
+        }
+
+        if (! $this->canManageEnrollments($actor)) {
+            abort(403, 'You cannot export enrollment payment history.');
+        }
+
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
+            'search' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'verification' => ['sometimes', 'nullable', 'string', 'in:pending,correct,invalid'],
+        ]));
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        return ExcelDownload::make(
+            'Payments',
+            ['Learner', 'Email', 'Program', 'Payment', 'Amount', 'Paid on', 'Status'],
+            $catalog->enrollmentPaymentsForExport(
+                isset($validated['search']) ? (string) $validated['search'] : null,
+                isset($validated['verification']) ? (string) $validated['verification'] : null,
+                $from,
+                $to
+            ),
+            'payment-history'
         );
     }
 

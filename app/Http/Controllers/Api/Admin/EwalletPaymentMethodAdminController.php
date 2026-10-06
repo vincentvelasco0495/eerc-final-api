@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\EwalletPaymentMethod;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -19,6 +21,29 @@ class EwalletPaymentMethodAdminController extends Controller
             ->map(fn (EwalletPaymentMethod $m) => $this->format($m));
 
         return response()->json(['data' => $rows]);
+    }
+
+    public function export(Request $request)
+    {
+        $validated = $request->validate(ExportDateRange::rules());
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        $query = EwalletPaymentMethod::query()
+            ->orderBy('sort_order')
+            ->orderBy('id');
+        ExportDateRange::constrain($query, $from, $to);
+
+        $rows = $query->get()->map(fn (EwalletPaymentMethod $m) => [
+            $m->mobile_number ?? '',
+            $m->account_name ?? '',
+        ])->values()->all();
+
+        return ExcelDownload::make(
+            'E-wallet methods',
+            ['Mobile number', 'Account name'],
+            $rows,
+            'ewallet-payment-methods'
+        );
     }
 
     public function store(Request $request): JsonResponse

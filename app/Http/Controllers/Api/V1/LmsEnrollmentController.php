@@ -13,12 +13,14 @@ use App\Models\LearningMode;
 use App\Models\PackageEnroll;
 use App\Models\Program;
 use App\Models\ReviewSchedule;
+use App\Models\Student;
 use App\Models\User;
 use App\Services\EnrollmentSchemaService;
 use App\Services\EnrollmentNotificationService;
 use App\Services\LmsCatalogService;
 use App\Support\EnrollmentPayments;
-use App\Support\SimpleXlsx;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -113,22 +115,16 @@ class LmsEnrollmentController extends Controller
             abort(403, 'You cannot export enrollments.');
         }
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
             'search' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ]);
+        ]));
         $search = isset($validated['search']) ? (string) $validated['search'] : null;
+        [$from, $to] = ExportDateRange::extract($validated);
 
         $headers = $catalog->enrollmentExportHeaders();
-        $rows = $catalog->enrollmentsForExport($search);
-        $binary = SimpleXlsx::build('Enrollments', $headers, $rows);
-        $filename = 'enrollments-'.now()->format('Y-m-d').'.xlsx';
+        $rows = $catalog->enrollmentsForExport($search, $from, $to);
 
-        return response($binary, 200, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
-            'Access-Control-Expose-Headers' => 'Content-Disposition',
-            'Cache-Control' => 'no-store, no-cache, must-revalidate',
-        ]);
+        return ExcelDownload::make('Enrollments', $headers, $rows, 'enrollments');
     }
 
     public function store(Request $request): JsonResponse
@@ -155,6 +151,118 @@ class LmsEnrollmentController extends Controller
         }
 
         return $this->storeProgramEnrollment($user, (string) $data['program_id'], $uploaded);
+    }
+
+    /**
+     * After an approved program enrollment, the learner requests access to one course.
+     * Admins approve or reject the new course-scoped enrollment row.
+     */
+    public function storeCourseAccessRequest(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'courseId' => ['required_without:course_id', 'nullable', 'string', 'max:64'],
+            'course_id' => ['required_without:courseId', 'nullable', 'string', 'max:64'],
+        ]);
+
+        $user = $this->lmsActor();
+        if ($user->id <= 0) {
+            abort(401, 'Authentication required.');
+        }
+
+        $coursePublicId = trim((string) ($data['courseId'] ?? $data['course_id'] ?? ''));
+        if ($coursePublicId === '') {
+            abort(422, 'Select a course before requesting access.');
+        }
+
+        $course = Course::query()->where('public_id', $coursePublicId)->with('program')->firstOrFail();
+        if (! $course->is_published) {
+            abort(422, 'This course is not open for access requests yet.');
+        }
+        $program = $course->program;
+        if ($program === null) {
+            abort(422, 'This course is not linked to a program.');
+        }
+
+        $parent = Enrollment::query()
+            ->where('user_id', $user->id)
+            ->where('program_id', $program->id)
+            ->whereNull('course_id')
+            ->approved()
+            ->orderByDesc('id')
+            ->first();
+
+        if ($parent === null) {
+            abort(422, 'Enroll in this program and wait for approval before requesting course access.');
+        }
+
+        $existing = Enrollment::query()
+            ->where('user_id', $user->id)
+            ->where('course_id', $course->id)
+            ->orderByDesc('id')
+            ->first();
+
+        if ($existing && in_array($existing->status, ['pending', 'approved', 'hold'], true)) {
+            return response()->json([
+                'message' => 'You already have an access request for this course.',
+            ], 409);
+        }
+
+        EnrollmentSchemaService::ensureFormDataColumns();
+        EnrollmentSchemaService::ensureRejectionReasonColumn();
+        EnrollmentSchemaService::ensureBatchEnrollIdColumn();
+        EnrollmentSchemaService::ensureLearningModeIdColumn();
+        EnrollmentSchemaService::ensureBranchEnrollIdColumn();
+        EnrollmentSchemaService::ensureReviewScheduleIdColumn();
+        EnrollmentSchemaService::ensureHonorAwardDiscountIdColumn();
+        EnrollmentSchemaService::ensurePackageEnrollIdColumn();
+
+        $payload = $this->courseAccessPayloadFromParent($parent);
+
+        if ($existing && $existing->status === 'rejected') {
+            $existing->update([
+                'program_id' => $program->id,
+                'course_id' => $course->id,
+                ...$payload,
+            ]);
+            $enrollment = $existing;
+        } else {
+            $enrollment = Enrollment::query()->create([
+                'public_id' => 'enrollment-'.Str::lower(Str::ulid()),
+                'user_id' => $user->id,
+                'program_id' => $program->id,
+                'course_id' => $course->id,
+                ...$payload,
+            ]);
+        }
+
+        $enrollment->load(['program', 'course', 'learningMode']);
+
+        LmsCatalogService::bustUserAnalyticsCache($user->id);
+        $this->notifyManagersOfEnrollment($enrollment);
+
+        return response()->json($this->formatStoreResponse($enrollment), 201);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function courseAccessPayloadFromParent(Enrollment $parent): array
+    {
+        $formData = is_array($parent->form_data) ? $parent->form_data : [];
+        $formData['requestKind'] = 'course_access';
+
+        return [
+            'status' => 'pending',
+            'submitted_at' => now()->toDateString(),
+            'rejection_reason' => null,
+            'form_data' => $formData,
+            'batch_enroll_id' => $parent->batch_enroll_id,
+            'learning_mode_id' => $parent->learning_mode_id,
+            'branch_enroll_id' => $parent->branch_enroll_id,
+            'review_schedule_id' => $parent->review_schedule_id,
+            'honor_award_discount_id' => $parent->honor_award_discount_id,
+            'package_enroll_id' => $parent->package_enroll_id,
+        ];
     }
 
     public function storeFullApplication(Request $request): JsonResponse
@@ -273,10 +381,24 @@ class LmsEnrollmentController extends Controller
 
         $enrollment->load(['program', 'course']);
 
+        $this->persistStudentAliasFromFormData($user, $formData);
+
         LmsCatalogService::bustUserAnalyticsCache($user->id);
         $this->notifyManagersOfEnrollment($enrollment);
 
         return response()->json($this->formatStoreResponse($enrollment), 201);
+    }
+
+    protected function persistStudentAliasFromFormData(User $user, array $formData): void
+    {
+        $alias = trim((string) ($formData['aliasName'] ?? $formData['alias_name'] ?? ''));
+        if ($alias === '') {
+            return;
+        }
+
+        $student = Student::query()->firstOrCreate(['user_id' => $user->id]);
+        $student->alias_name = $alias;
+        $student->save();
     }
 
     protected function deleteEnrollmentDocuments(Enrollment $enrollment): void
@@ -433,8 +555,15 @@ class LmsEnrollmentController extends Controller
             'programTitle' => $enrollment->program?->title ?? '',
             'submittedAt' => optional($enrollment->submitted_at)->format('Y-m-d'),
             'status' => $enrollment->status,
-            'hasPaymentProof' => true,
+            'hasPaymentProof' => (bool) $enrollment->payment_proof_path,
+            'learningModeId' => $enrollment->learningMode?->public_id,
+            'learningModeName' => $enrollment->learningMode?->name ?: ($enrollment->learningMode?->label ?? ''),
         ];
+
+        $formData = is_array($enrollment->form_data) ? $enrollment->form_data : [];
+        if ($formData !== []) {
+            $payload['formData'] = $formData;
+        }
 
         if ($enrollment->course_id !== null && $enrollment->relationLoaded('course') && $enrollment->course !== null) {
             $payload['courseId'] = $enrollment->course->public_id;
@@ -493,6 +622,7 @@ class LmsEnrollmentController extends Controller
             'userEmail' => $enrollment->user->email ?? '',
             'phoneNumber' => $student?->phone_number ?? '',
             'schoolHeld' => $student?->school_held ?? '',
+            'aliasName' => $student?->alias_name ?? '',
             'hasFormData' => is_array($formData) && $formData !== [],
             'formData' => is_array($formData) ? $formData : null,
             'documents' => $documentSummaries,

@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\Concerns\ResolvesLmsActor;
 use App\Http\Controllers\Controller;
 use App\Models\Course;
 use App\Services\LmsCatalogService;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -49,6 +51,29 @@ class LmsGradebookController extends Controller
                 (int) ($validated['page'] ?? 1),
                 (int) ($validated['per_page'] ?? 10)
             )
+        );
+    }
+
+    public function export(Request $request, string $coursePublicId, LmsCatalogService $catalog)
+    {
+        $actor = $this->lmsActor();
+
+        if (! $catalog->userCanViewGradebook($actor)) {
+            abort(403, 'You do not have permission to export the gradebook.');
+        }
+
+        $validated = $request->validate(ExportDateRange::rules());
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        $course = Course::query()
+            ->where('public_id', $coursePublicId)
+            ->firstOrFail();
+
+        return ExcelDownload::make(
+            'Gradebook',
+            ['Student', 'Email', 'Lessons', 'Quizzes', 'Assignments', 'Progress', 'Started'],
+            $catalog->gradebookForExport($course, $from, $to),
+            'gradebook'
         );
     }
 }

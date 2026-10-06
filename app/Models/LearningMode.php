@@ -52,6 +52,18 @@ class LearningMode extends Model
         );
     }
 
+    /**
+     * PURE ONLINE CLASS or BLENDED LEARNING may use LMS lesson tabs.
+     * FACE TO FACE CLASS cannot.
+     */
+    public function grantsDigitalLessonAccess(): bool
+    {
+        return static::looksLikeDigitalLessonAccess(
+            (string) $this->public_id,
+            (string) ($this->name ?? '')
+        );
+    }
+
     public static function looksLikeOnlineClass(string $publicId, string $name): bool
     {
         $id = strtolower(trim($publicId));
@@ -64,6 +76,36 @@ class LearningMode extends Model
         }
 
         return str_contains($id, 'online') || str_contains($label, 'online');
+    }
+
+    public static function looksLikeBlendedClass(string $publicId, string $name): bool
+    {
+        $id = strtolower(trim($publicId));
+        $label = strtolower(trim($name));
+
+        return str_contains($id, 'blended') || str_contains($label, 'blended');
+    }
+
+    public static function looksLikeDigitalLessonAccess(string $publicId, string $name): bool
+    {
+        return static::digitalAccessTier($publicId, $name) !== 'none';
+    }
+
+    /**
+     * `full` — Pure online class (all LMS tabs).
+     * `replay` — Blended learning (lecture video / replay only).
+     * `none` — Face to face, or unrecognized.
+     */
+    public static function digitalAccessTier(string $publicId, string $name): string
+    {
+        if (static::looksLikeBlendedClass($publicId, $name)) {
+            return 'replay';
+        }
+        if (static::looksLikeOnlineClass($publicId, $name)) {
+            return 'full';
+        }
+
+        return 'none';
     }
 
     /**

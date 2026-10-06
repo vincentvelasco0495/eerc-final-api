@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Program;
 use App\Services\LmsCatalogService;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use App\Support\HttpCache;
 use App\Support\PageAuthorization;
 use Illuminate\Http\JsonResponse;
@@ -38,6 +40,29 @@ class LmsProgramController extends Controller
         $payload = $catalog->programsPaginated($page, $perPage, $search);
 
         return response()->json($payload);
+    }
+
+    public function export(Request $request, LmsCatalogService $catalog)
+    {
+        if ($response = PageAuthorization::denyUnlessCanAccess($request, '/setting-program')) {
+            return $response;
+        }
+
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
+            'search' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]));
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        return ExcelDownload::make(
+            'Programs',
+            ['Code', 'Slug', 'Title', 'Enrollment fee', 'Status'],
+            $catalog->programsForExport(
+                isset($validated['search']) ? (string) $validated['search'] : null,
+                $from,
+                $to
+            ),
+            'programs'
+        );
     }
 
     public function stats(string $programPublicId, LmsCatalogService $catalog): JsonResponse|Response

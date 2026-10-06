@@ -23,15 +23,28 @@ class LmsInAppNotificationController extends Controller
             abort(Response::HTTP_UNAUTHORIZED, 'Authentication required.');
         }
 
-        $items = InAppNotification::query()
+        $query = InAppNotification::query()
             ->where('user_id', $user->id)
             ->with([
                 'announcement:id,public_id,title,body',
                 'enrollment:id,public_id,rejection_reason',
             ])
             ->orderByDesc('created_at')
-            ->limit(100)
-            ->get();
+            ->limit(100);
+
+        $role = strtolower(trim((string) ($user->role ?? '')));
+        if ($role === 'student') {
+            $query->where(function ($q) {
+                $q->whereIn('kind', [
+                    'announcement',
+                    'enrollment_approved',
+                    'enrollment_rejected',
+                    'enrollment_on_hold',
+                ])->orWhereNull('kind');
+            });
+        }
+
+        $items = $query->get();
 
         $data = $items->map(fn (InAppNotification $n) => $this->toDrawerPayload($n))->values();
 

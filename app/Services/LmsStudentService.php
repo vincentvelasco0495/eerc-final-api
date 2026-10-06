@@ -33,6 +33,7 @@ class LmsStudentService
             'phoneNumber' => $student->phone_number,
             'birthday' => optional($student->birthday)->format('Y-m-d'),
             'schoolHeld' => $student->school_held,
+            'aliasName' => $student->alias_name,
         ];
     }
 
@@ -120,6 +121,11 @@ class LmsStudentService
                 ? trim((string) $data['schoolHeld'])
                 : null;
         }
+        if (array_key_exists('aliasName', $data)) {
+            $student->alias_name = $data['aliasName'] !== null && trim((string) $data['aliasName']) !== ''
+                ? trim((string) $data['aliasName'])
+                : null;
+        }
 
         $student->save();
 
@@ -152,6 +158,7 @@ class LmsStudentService
                 'students.user_id',
                 'students.notes',
                 'students.profile_path',
+                'students.alias_name',
                 'students.created_at',
                 'students.updated_at',
             ])
@@ -163,6 +170,7 @@ class LmsStudentService
             $like = '%'.addcslashes($term, '%_\\').'%';
             $query->where(function ($q) use ($like) {
                 $q->where('students.notes', 'like', $like)
+                    ->orWhere('students.alias_name', 'like', $like)
                     ->orWhere('users.name', 'like', $like)
                     ->orWhere('users.email', 'like', $like)
                     ->orWhere('users.status', 'like', $like);
@@ -186,5 +194,55 @@ class LmsStudentService
                 'to' => $paginator->lastItem() ?? 0,
             ],
         ];
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function studentsForExport(?string $search = null, ?string $from = null, ?string $to = null): array
+    {
+        $query = Student::query()
+            ->with('user')
+            ->join('users', 'users.id', '=', 'students.user_id')
+            ->select([
+                'students.id',
+                'students.user_id',
+                'students.notes',
+                'students.profile_path',
+                'students.alias_name',
+                'students.created_at',
+                'students.updated_at',
+            ])
+            ->orderBy('users.name')
+            ->orderByDesc('students.id');
+
+        $term = $search !== null ? trim($search) : '';
+        if ($term !== '') {
+            $like = '%'.addcslashes($term, '%_\\').'%';
+            $query->where(function ($q) use ($like) {
+                $q->where('students.notes', 'like', $like)
+                    ->orWhere('students.alias_name', 'like', $like)
+                    ->orWhere('users.name', 'like', $like)
+                    ->orWhere('users.email', 'like', $like)
+                    ->orWhere('users.status', 'like', $like);
+            });
+        }
+
+        \App\Support\ExportDateRange::constrain($query, $from, $to, 'students.created_at');
+
+        return $query->get()
+            ->map(function (Student $s) {
+                $row = $this->formatStudent($s);
+
+                return [
+                    $row['name'] ?? '',
+                    $row['aliasName'] ?? '',
+                    $row['email'] ?? '',
+                    $row['status'] ?? '',
+                    $row['notes'] ?? '',
+                ];
+            })
+            ->values()
+            ->all();
     }
 }

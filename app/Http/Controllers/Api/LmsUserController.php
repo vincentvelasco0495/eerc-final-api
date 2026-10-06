@@ -48,6 +48,7 @@ class LmsUserController extends Controller
             'lastName' => ['sometimes', 'nullable', 'string', 'max:120'],
             'schoolHeld' => ['sometimes', 'nullable', 'string', 'max:255'],
             'watermarkName' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'aliasName' => ['sometimes', 'nullable', 'string', 'max:255'],
             'displayName' => ['sometimes', 'nullable', 'string', 'max:120'],
             'position' => ['sometimes', 'nullable', 'string', 'max:255'],
             'bio' => ['sometimes', 'nullable', 'string', 'max:5000'],
@@ -120,7 +121,7 @@ class LmsUserController extends Controller
         if ($isStudent) {
             Student::query()->firstOrCreate(['user_id' => $user->id]);
             $studentFields = [];
-            foreach (['phoneNumber', 'birthday', 'schoolHeld'] as $key) {
+            foreach (['phoneNumber', 'birthday', 'schoolHeld', 'aliasName'] as $key) {
                 if (array_key_exists($key, $validated)) {
                     $studentFields[$key] = $validated[$key];
                 }

@@ -72,7 +72,17 @@ class LmsQuizController extends Controller
     public function questions(string $publicId, LmsCatalogService $catalog): JsonResponse
     {
         $user = $this->lmsActor();
-        $quiz = Quiz::query()->where('public_id', $publicId)->with(['questions.options'])->firstOrFail();
+        $quiz = Quiz::query()->where('public_id', $publicId)->with(['course', 'questions.options'])->firstOrFail();
+
+        if ($quiz->course !== null) {
+            if ($message = $catalog->curriculumAccessDeniedMessage($user, $quiz->course, 'quiz')) {
+                return response()->json(['message' => $message], 403);
+            }
+
+            if ($catalog->isCurriculumItemLockedForUser($user, $quiz->course, $quiz->public_id)) {
+                return response()->json(['message' => 'Complete earlier lessons before attempting this quiz.'], 403);
+            }
+        }
 
         $items = $quiz->questions
             ->map(fn (Question $q) => $catalog->formatQuizQuestion($q, $user))
@@ -285,7 +295,7 @@ class LmsQuizController extends Controller
         $quiz = Quiz::query()->where('public_id', $publicId)->with(['course'])->withCount('questions')->firstOrFail();
 
         if ($quiz->course !== null) {
-            if ($message = $catalog->curriculumAccessDeniedMessage($user, $quiz->course)) {
+            if ($message = $catalog->curriculumAccessDeniedMessage($user, $quiz->course, 'quiz')) {
                 return response()->json(['message' => $message], 403);
             }
 

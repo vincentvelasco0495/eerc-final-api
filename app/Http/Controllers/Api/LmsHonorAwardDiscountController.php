@@ -6,7 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\HonorAwardDiscount;
 use App\Services\EnrollmentSchemaService;
 use App\Services\LmsCatalogService;
-use App\Support\SimpleXlsx;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -69,6 +70,46 @@ class LmsHonorAwardDiscountController extends Controller
         return response()->json(['data' => $rows]);
     }
 
+    public function export(Request $request)
+    {
+        EnrollmentSchemaService::ensureHonorAwardDiscountIdColumn();
+
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
+            'search' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]));
+        $search = isset($validated['search']) ? trim((string) $validated['search']) : '';
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        $query = HonorAwardDiscount::query()
+            ->orderBy('sort_order')
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id');
+
+        if ($search !== '') {
+            $like = '%'.addcslashes($search, '%_\\').'%';
+            $query->where(function ($q) use ($like) {
+                $q->where('name', 'like', $like)
+                    ->orWhere('description', 'like', $like);
+            });
+        }
+
+        ExportDateRange::constrain($query, $from, $to);
+
+        $rows = $query->get()->map(fn (HonorAwardDiscount $row) => [
+            $row->name ?? '',
+            $row->status ?? 'active',
+            (int) $row->sort_order,
+            ExcelDownload::plain($row->description),
+        ])->values()->all();
+
+        return ExcelDownload::make(
+            'Discounts',
+            ['Name', 'Status', 'Sort order', 'Description'],
+            $rows,
+            'honor-award-discounts'
+        );
+    }
+
     public function applicants(Request $request, string $publicId, LmsCatalogService $catalog): JsonResponse
     {
         EnrollmentSchemaService::ensureHonorAwardDiscountIdColumn();
@@ -105,13 +146,14 @@ class LmsHonorAwardDiscountController extends Controller
 
         $option = HonorAwardDiscount::query()->where('public_id', $publicId)->firstOrFail();
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
             'search' => ['sometimes', 'nullable', 'string', 'max:255'],
             'status' => ['sometimes', 'nullable', 'string', 'in:pending,approved,rejected,hold'],
             'program' => ['sometimes', 'nullable', 'string', 'max:64'],
             'batch' => ['sometimes', 'nullable', 'string', 'max:64'],
             'branch' => ['sometimes', 'nullable', 'string', 'max:64'],
-        ]);
+        ]));
+        [$from, $to] = ExportDateRange::extract($validated);
 
         $headers = $catalog->honorAwardDiscountApplicantExportHeaders();
         $rows = $catalog->honorAwardDiscountApplicantsForExport(
@@ -120,17 +162,12 @@ class LmsHonorAwardDiscountController extends Controller
             isset($validated['status']) ? (string) $validated['status'] : null,
             isset($validated['program']) ? (string) $validated['program'] : null,
             isset($validated['batch']) ? (string) $validated['batch'] : null,
-            isset($validated['branch']) ? (string) $validated['branch'] : null
+            isset($validated['branch']) ? (string) $validated['branch'] : null,
+            $from,
+            $to
         );
-        $binary = SimpleXlsx::build('Applicants', $headers, $rows);
-        $filename = 'honor-award-discount-applicants-'.now()->format('Y-m-d').'.xlsx';
 
-        return response($binary, 200, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
-            'Access-Control-Expose-Headers' => 'Content-Disposition',
-            'Cache-Control' => 'no-store, no-cache, must-revalidate',
-        ]);
+        return ExcelDownload::make('Applicants', $headers, $rows, 'honor-award-discount-applicants');
     }
 
     public function store(Request $request): JsonResponse

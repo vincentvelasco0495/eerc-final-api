@@ -99,6 +99,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/instructors', [LmsInstructorController::class, 'index']);
 
     Route::middleware('page:/setting-program')->group(function () {
+        Route::get('/programs/export', [LmsProgramController::class, 'export']);
         Route::get('/programs/{programPublicId}/applicants', [LmsProgramController::class, 'applicants']);
         Route::post('/programs', [LmsProgramController::class, 'store']);
         Route::patch('/programs/{programPublicId}', [LmsProgramController::class, 'update']);
@@ -106,6 +107,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('page:/setting-batch-enroll')->group(function () {
+        Route::get('/batch-enrolls/export', [LmsBatchEnrollController::class, 'export']);
         Route::get('/batch-enrolls/{publicId}/applicants/export', [LmsBatchEnrollController::class, 'exportApplicants']);
         Route::get('/batch-enrolls/{publicId}/applicants', [LmsBatchEnrollController::class, 'applicants']);
         Route::get('/batch-enrolls', [LmsBatchEnrollController::class, 'index']);
@@ -115,6 +117,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('staff')->group(function () {
+        Route::get('/branch-enrolls/export', [LmsBranchEnrollController::class, 'export']);
         Route::get('/branch-enrolls/{publicId}/applicants/export', [LmsBranchEnrollController::class, 'exportApplicants']);
         Route::get('/branch-enrolls/{publicId}/applicants', [LmsBranchEnrollController::class, 'applicants']);
         Route::get('/branch-enrolls', [LmsBranchEnrollController::class, 'index']);
@@ -124,6 +127,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('staff')->group(function () {
+        Route::get('/review-schedules/export', [LmsReviewScheduleController::class, 'export']);
         Route::get('/review-schedules/{publicId}/applicants/export', [LmsReviewScheduleController::class, 'exportApplicants']);
         Route::get('/review-schedules/{publicId}/applicants', [LmsReviewScheduleController::class, 'applicants']);
         Route::get('/review-schedules', [LmsReviewScheduleController::class, 'index']);
@@ -133,6 +137,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('staff')->group(function () {
+        Route::get('/honor-award-discounts/export', [LmsHonorAwardDiscountController::class, 'export']);
         Route::get('/honor-award-discounts/{publicId}/applicants/export', [LmsHonorAwardDiscountController::class, 'exportApplicants']);
         Route::get('/honor-award-discounts/{publicId}/applicants', [LmsHonorAwardDiscountController::class, 'applicants']);
         Route::get('/honor-award-discounts', [LmsHonorAwardDiscountController::class, 'index']);
@@ -142,6 +147,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('staff')->group(function () {
+        Route::get('/package-enrolls/export', [LmsPackageEnrollController::class, 'export']);
         Route::get('/package-enrolls/{publicId}/applicants/export', [LmsPackageEnrollController::class, 'exportApplicants']);
         Route::get('/package-enrolls/{publicId}/applicants', [LmsPackageEnrollController::class, 'applicants']);
         Route::get('/package-enrolls', [LmsPackageEnrollController::class, 'index']);
@@ -151,6 +157,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('staff')->group(function () {
+        Route::get('/learning-modes/export', [LmsLearningModeController::class, 'export']);
         Route::get('/learning-modes/{publicId}/applicants/export', [LmsLearningModeController::class, 'exportApplicants']);
         Route::get('/learning-modes/{publicId}/applicants', [LmsLearningModeController::class, 'applicants']);
         Route::get('/learning-modes', [LmsLearningModeController::class, 'index']);
@@ -160,6 +167,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('page:/setting-instructor')->group(function () {
+        Route::get('/instructors/export', [LmsInstructorController::class, 'export']);
         Route::get('/instructors/linkable-users', [LmsInstructorController::class, 'linkableUsers']);
         Route::post('/instructors', [LmsInstructorController::class, 'store']);
         Route::patch('/instructors/{userPublicUid}', [LmsInstructorController::class, 'update']);
@@ -167,6 +175,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('page:/setting-student')->group(function () {
+        Route::get('/students/export', [LmsStudentController::class, 'export']);
         Route::get('/students/linkable-users', [LmsStudentController::class, 'linkableUsers']);
         Route::get('/students', [LmsStudentController::class, 'index']);
         Route::post('/students', [LmsStudentController::class, 'store']);
@@ -175,11 +184,13 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('page:/setting-payment')->group(function () {
+        Route::get('/admin/bank-payment-methods/export', [BankPaymentMethodAdminController::class, 'export']);
         Route::get('/admin/bank-payment-methods', [BankPaymentMethodAdminController::class, 'index']);
         Route::post('/admin/bank-payment-methods', [BankPaymentMethodAdminController::class, 'store']);
         Route::patch('/admin/bank-payment-methods/{publicId}', [BankPaymentMethodAdminController::class, 'update']);
         Route::delete('/admin/bank-payment-methods/{publicId}', [BankPaymentMethodAdminController::class, 'destroy']);
 
+        Route::get('/admin/ewallet-payment-methods/export', [EwalletPaymentMethodAdminController::class, 'export']);
         Route::get('/admin/ewallet-payment-methods', [EwalletPaymentMethodAdminController::class, 'index']);
         Route::post('/admin/ewallet-payment-methods', [EwalletPaymentMethodAdminController::class, 'store']);
         Route::patch('/admin/ewallet-payment-methods/{publicId}', [EwalletPaymentMethodAdminController::class, 'update']);
@@ -194,6 +205,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/standalone-lessons/{publicId}', [LmsModuleController::class, 'destroyStandaloneLesson']);
     Route::patch('/courses/{publicId}', [LmsCourseController::class, 'update']);
     Route::get('/enrollment-form/options', [LmsEnrollmentFormOptionsController::class, 'show']);
+    Route::get('/enrollment-payments/export', [LmsEnrollmentPaymentController::class, 'export']);
     Route::get('/enrollment-payments', [LmsEnrollmentPaymentController::class, 'index']);
     Route::get('/enrollments/enrolled-courses', [LmsEnrollmentController::class, 'enrolledCourses']);
     Route::get('/enrollments/export', [LmsEnrollmentController::class, 'export']);
@@ -206,22 +218,34 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/courses/{coursePublicId}/lesson-progress', [LmsLessonProgressController::class, 'index']);
     Route::post('/courses/{coursePublicId}/lesson-progress', [LmsLessonProgressController::class, 'complete']);
     Route::patch('/courses/{coursePublicId}/lesson-progress', [LmsLessonProgressController::class, 'heartbeat']);
+    Route::get('/quiz-results/export', [LmsQuizResultController::class, 'export']);
     Route::get('/quiz-results', [LmsQuizResultController::class, 'index']);
+    Route::get('/assignment-summaries/export', [LmsAssignmentSummaryController::class, 'export']);
     Route::get('/assignment-summaries', [LmsAssignmentSummaryController::class, 'index']);
+    Route::get('/quiz-summaries/export', [LmsQuizSummaryController::class, 'export']);
     Route::get('/quiz-summaries', [LmsQuizSummaryController::class, 'index']);
     Route::get('/gradebook/courses', [LmsGradebookController::class, 'courses']);
+    Route::get('/gradebook/courses/{coursePublicId}/export', [LmsGradebookController::class, 'export']);
     Route::get('/gradebook/courses/{coursePublicId}', [LmsGradebookController::class, 'show']);
     Route::get('/my-assignments', [LmsMyAssignmentController::class, 'index']);
     Route::get('/my-quizzes', [LmsMyQuizController::class, 'index']);
+    Route::get('/assignments/{publicId}/students/export', [LmsAssignmentSummaryController::class, 'exportStudents']);
     Route::get('/assignments/{publicId}/students', [LmsAssignmentSummaryController::class, 'students']);
+    Route::get('/assignments/{publicId}/leaderboard/export', [LmsAssignmentSummaryController::class, 'exportLeaderboard']);
     Route::get('/assignments/{publicId}/leaderboard', [LmsAssignmentSummaryController::class, 'leaderboard']);
+    Route::get('/quizzes/{publicId}/students/export', [LmsQuizSummaryController::class, 'exportStudents']);
     Route::get('/quizzes/{publicId}/students', [LmsQuizSummaryController::class, 'students']);
+    Route::get('/quizzes/{publicId}/leaderboard/export', [LmsQuizSummaryController::class, 'exportLeaderboard']);
     Route::get('/quizzes/{publicId}/leaderboard', [LmsQuizSummaryController::class, 'leaderboard']);
+    Route::get('/leaderboard/export', [LmsLeaderboardController::class, 'export']);
     Route::get('/leaderboard', [LmsLeaderboardController::class, 'show']);
     Route::get('/analytics', [LmsAnalyticsController::class, 'show']);
+    Route::get('/admin/users/export', [LmsAdminSummaryController::class, 'exportUsers']);
+    Route::get('/admin/enrollments/export', [LmsAdminSummaryController::class, 'exportEnrollments']);
     Route::get('/admin', [LmsAdminSummaryController::class, 'show']);
 
     Route::post('/enrollments', [LmsEnrollmentController::class, 'store']);
+    Route::post('/enrollments/course-access-requests', [LmsEnrollmentController::class, 'storeCourseAccessRequest']);
     Route::get('/enrollments/{publicId}', [LmsEnrollmentController::class, 'show']);
     Route::get('/enrollments/{publicId}/payment-proof', [LmsEnrollmentController::class, 'downloadPaymentProof']);
     Route::post('/enrollments/{publicId}/partial-payments', [LmsEnrollmentController::class, 'storePartialPayment']);
@@ -257,6 +281,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/admin/uploads', [LmsAdminUploadController::class, 'store']);
 
     Route::middleware('page:/feedback')->group(function () {
+        Route::get('/admin/contact-feedback/export', [ContactFeedbackAdminController::class, 'export']);
         Route::get('/admin/contact-feedback', [ContactFeedbackAdminController::class, 'index']);
     });
 

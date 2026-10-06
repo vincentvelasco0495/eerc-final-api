@@ -13,6 +13,7 @@ use App\Models\CmsMedia;
 use App\Models\Course;
 use App\Models\Enrollment;
 use App\Models\HonorAwardDiscount;
+use App\Models\LeaderboardEntry;
 use App\Models\LearningMode;
 use App\Models\LessonMaterial;
 use App\Models\Module;
@@ -28,6 +29,7 @@ use App\Models\Student;
 use App\Models\User;
 use App\Models\UserLessonProgress;
 use App\Models\UserModuleProgress;
+use App\Support\ExportDateRange;
 use App\Support\LessonMetaSupport;
 use App\Support\LmsCache;
 use App\Support\LmsMeta;
@@ -261,11 +263,16 @@ class LmsCatalogService
     public function batchApplicantsForExport(
         BatchEnroll $batch,
         ?string $search = null,
-        ?string $status = null
+        ?string $status = null,
+        ?string $from = null,
+        ?string $to = null
     ): array {
         $batch->loadMissing('program');
 
-        return $this->batchApplicantsQuery($batch, $search, $status)
+        $query = $this->batchApplicantsQuery($batch, $search, $status);
+        ExportDateRange::constrainCoalesce($query, $from, $to);
+
+        return $query
             ->get()
             ->map(function (Enrollment $e) use ($batch) {
                 $applied = $e->submitted_at ?? $e->created_at;
@@ -428,15 +435,20 @@ class LmsCatalogService
         ?string $search = null,
         ?string $status = null,
         ?string $programPublicId = null,
-        ?string $batchPublicId = null
+        ?string $batchPublicId = null,
+        ?string $from = null,
+        ?string $to = null
     ): array {
-        return $this->learningModeApplicantsQuery(
+        $query = $this->learningModeApplicantsQuery(
             $mode,
             $search,
             $status,
             $programPublicId,
             $batchPublicId
-        )
+        );
+        ExportDateRange::constrainCoalesce($query, $from, $to);
+
+        return $query
             ->get()
             ->map(function (Enrollment $e) use ($mode) {
                 $applied = $e->submitted_at ?? $e->created_at;
@@ -633,16 +645,21 @@ class LmsCatalogService
         ?string $status = null,
         ?string $programPublicId = null,
         ?string $batchPublicId = null,
-        ?string $learningModePublicId = null
+        ?string $learningModePublicId = null,
+        ?string $from = null,
+        ?string $to = null
     ): array {
-        return $this->branchApplicantsQuery(
+        $query = $this->branchApplicantsQuery(
             $branch,
             $search,
             $status,
             $programPublicId,
             $batchPublicId,
             $learningModePublicId
-        )
+        );
+        ExportDateRange::constrainCoalesce($query, $from, $to);
+
+        return $query
             ->get()
             ->map(function (Enrollment $e) use ($branch) {
                 $applied = $e->submitted_at ?? $e->created_at;
@@ -811,18 +828,23 @@ class LmsCatalogService
         ?string $status = null,
         ?string $programPublicId = null,
         ?string $batchPublicId = null,
-        ?string $learningModePublicId = null
+        ?string $learningModePublicId = null,
+        ?string $from = null,
+        ?string $to = null
     ): array {
         $schedule->loadMissing('branchEnroll');
 
-        return $this->reviewScheduleApplicantsQuery(
+        $query = $this->reviewScheduleApplicantsQuery(
             $schedule,
             $search,
             $status,
             $programPublicId,
             $batchPublicId,
             $learningModePublicId
-        )
+        );
+        ExportDateRange::constrainCoalesce($query, $from, $to);
+
+        return $query
             ->get()
             ->map(function (Enrollment $e) use ($schedule) {
                 $applied = $e->submitted_at ?? $e->created_at;
@@ -1002,16 +1024,21 @@ class LmsCatalogService
         ?string $status = null,
         ?string $programPublicId = null,
         ?string $batchPublicId = null,
-        ?string $branchPublicId = null
+        ?string $branchPublicId = null,
+        ?string $from = null,
+        ?string $to = null
     ): array {
-        return $this->honorAwardDiscountApplicantsQuery(
+        $query = $this->honorAwardDiscountApplicantsQuery(
             $option,
             $search,
             $status,
             $programPublicId,
             $batchPublicId,
             $branchPublicId
-        )
+        );
+        ExportDateRange::constrainCoalesce($query, $from, $to);
+
+        return $query
             ->get()
             ->map(function (Enrollment $e) use ($option) {
                 $applied = $e->submitted_at ?? $e->created_at;
@@ -1181,16 +1208,21 @@ class LmsCatalogService
         ?string $status = null,
         ?string $programPublicId = null,
         ?string $batchPublicId = null,
-        ?string $branchPublicId = null
+        ?string $branchPublicId = null,
+        ?string $from = null,
+        ?string $to = null
     ): array {
-        return $this->packageEnrollApplicantsQuery(
+        $query = $this->packageEnrollApplicantsQuery(
             $package,
             $search,
             $status,
             $programPublicId,
             $batchPublicId,
             $branchPublicId
-        )
+        );
+        ExportDateRange::constrainCoalesce($query, $from, $to);
+
+        return $query
             ->get()
             ->map(function (Enrollment $e) use ($package) {
                 $row = $this->formatApplicantRow($e);
@@ -1507,8 +1539,7 @@ class LmsCatalogService
     }
 
     /**
-     * Published catalog courses the learner may access from approved enrollments
-     * (per-course approval or legacy full-program approval).
+     * Published catalog courses the learner may access from approved course enrollments.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -1527,26 +1558,14 @@ class LmsCatalogService
             ->with(['program', 'course.program', 'course.tags', 'course.subjects', 'course.nextModule', 'course.modules'])
             ->where('user_id', $user->id)
             ->approved()
+            ->whereNotNull('course_id')
             ->get();
 
         $courseModels = collect();
 
         foreach ($enrollments as $enrollment) {
-            if ($enrollment->course_id && $enrollment->course) {
-                if ($enrollment->course->is_published) {
-                    $courseModels->push($enrollment->course);
-                }
-
-                continue;
-            }
-
-            if ($enrollment->program_id && ! $enrollment->course_id) {
-                $programCourses = Course::query()
-                    ->with(['program', 'tags', 'subjects', 'nextModule', 'modules'])
-                    ->where('program_id', $enrollment->program_id)
-                    ->where('is_published', true)
-                    ->get();
-                $courseModels = $courseModels->merge($programCourses);
+            if ($enrollment->course && $enrollment->course->is_published) {
+                $courseModels->push($enrollment->course);
             }
         }
 
@@ -1633,11 +1652,47 @@ class LmsCatalogService
     /**
      * @return list<list<string>>
      */
-    public function enrollmentsForExport(?string $search = null): array
+    public function enrollmentsForExport(?string $search = null, ?string $from = null, ?string $to = null): array
     {
-        return $this->enrollmentsIndexQuery($search)
+        $query = $this->enrollmentsIndexQuery($search);
+        ExportDateRange::constrainCoalesce($query, $from, $to);
+
+        return $query
             ->get()
             ->map(fn (Enrollment $e) => $this->formatEnrollmentExportRow($e))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function programsForExport(?string $search = null, ?string $from = null, ?string $to = null): array
+    {
+        $query = Program::query()
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id');
+
+        $term = $search !== null ? trim($search) : '';
+        if ($term !== '') {
+            $like = '%'.addcslashes($term, '%_\\').'%';
+            $query->where(function ($q) use ($like) {
+                $q->where('title', 'like', $like)
+                    ->orWhere('code', 'like', $like)
+                    ->orWhere('slug', 'like', $like);
+            });
+        }
+
+        ExportDateRange::constrain($query, $from, $to);
+
+        return $query->get()
+            ->map(fn (Program $p) => [
+                $p->code ?? '',
+                $p->slug ?? '',
+                $p->title ?? '',
+                $p->enrollment_fee !== null ? (string) (float) $p->enrollment_fee : '',
+                $p->status ?? 'active',
+            ])
             ->values()
             ->all();
     }
@@ -1663,12 +1718,7 @@ class LmsCatalogService
             if ($course === null) {
                 $query->whereRaw('0 = 1');
             } else {
-                $query->where(function ($q) use ($course) {
-                    $q->where('course_id', $course->id)
-                        ->orWhere(function ($inner) use ($course) {
-                            $inner->whereNull('course_id')->where('program_id', $course->program_id);
-                        });
-                });
+                $query->where('course_id', $course->id);
             }
         }
 
@@ -1796,11 +1846,11 @@ class LmsCatalogService
 
                 $courseLabel = '—';
                 if ($courses->isNotEmpty() && $hasProgramWide) {
-                    $courseLabel = $courses->implode(', ').', All courses';
+                    $courseLabel = $courses->implode(', ').', Program enrollment';
                 } elseif ($courses->isNotEmpty()) {
                     $courseLabel = $courses->implode(', ');
                 } elseif ($hasProgramWide) {
-                    $courseLabel = 'All courses';
+                    $courseLabel = 'Program enrollment';
                 }
 
                 return [
@@ -1859,6 +1909,69 @@ class LmsCatalogService
         ?string $search = null,
         ?string $verification = null
     ): array {
+        $rows = $this->enrollmentPaymentRows($search, $verification);
+
+        usort($rows, fn (array $a, array $b) => strcmp((string) ($b['paidAt'] ?? ''), (string) ($a['paidAt'] ?? '')));
+
+        $total = count($rows);
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $currentPage = min(max(1, $page), $lastPage);
+        $offset = ($currentPage - 1) * $perPage;
+        $slice = array_slice($rows, $offset, $perPage);
+        $from = $total === 0 ? 0 : $offset + 1;
+        $to = $total === 0 ? 0 : min($offset + $perPage, $total);
+
+        return [
+            'data' => $slice,
+            'meta' => [
+                'current_page' => $currentPage,
+                'last_page' => $lastPage,
+                'per_page' => $perPage,
+                'total' => $total,
+                'from' => $from,
+                'to' => $to,
+            ],
+        ];
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function enrollmentPaymentsForExport(
+        ?string $search = null,
+        ?string $verification = null,
+        ?string $from = null,
+        ?string $to = null
+    ): array {
+        $rows = ExportDateRange::filterAssocRows(
+            $this->enrollmentPaymentRows($search, $verification),
+            $from,
+            $to,
+            'paidAt'
+        );
+
+        usort($rows, fn (array $a, array $b) => strcmp((string) ($b['paidAt'] ?? ''), (string) ($a['paidAt'] ?? '')));
+
+        return array_map(static fn (array $row) => [
+            (string) ($row['userName'] ?? ''),
+            (string) ($row['userEmail'] ?? ''),
+            (string) ($row['programTitle'] ?? ''),
+            (string) ($row['label'] ?? ''),
+            (string) ($row['amount'] ?? ''),
+            (string) ($row['paidAt'] ?? ''),
+            match ((string) ($row['verificationStatus'] ?? '')) {
+                'correct' => 'Correct',
+                'invalid' => 'Invalid',
+                default => 'Pending',
+            },
+        ], $rows);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    protected function enrollmentPaymentRows(?string $search = null, ?string $verification = null): array
+    {
         $enrollments = Enrollment::query()
             ->with(['program', 'user'])
             ->orderByDesc('submitted_at')
@@ -1909,27 +2022,7 @@ class LmsCatalogService
             ));
         }
 
-        usort($rows, fn (array $a, array $b) => strcmp((string) ($b['paidAt'] ?? ''), (string) ($a['paidAt'] ?? '')));
-
-        $total = count($rows);
-        $lastPage = max(1, (int) ceil($total / $perPage));
-        $currentPage = min(max(1, $page), $lastPage);
-        $offset = ($currentPage - 1) * $perPage;
-        $slice = array_slice($rows, $offset, $perPage);
-        $from = $total === 0 ? 0 : $offset + 1;
-        $to = $total === 0 ? 0 : min($offset + $perPage, $total);
-
-        return [
-            'data' => $slice,
-            'meta' => [
-                'current_page' => $currentPage,
-                'last_page' => $lastPage,
-                'per_page' => $perPage,
-                'total' => $total,
-                'from' => $from,
-                'to' => $to,
-            ],
-        ];
+        return $rows;
     }
 
     /**
@@ -1978,14 +2071,7 @@ class LmsCatalogService
             ->map(fn ($m) => $this->formatModule($m, $user))
             ->all();
 
-        if ($user->id > 0 && ! $this->userCanAccessCourseLessons($user, $course)) {
-            return $this->applyEnrollmentLocksToModules($formatted);
-        }
-
-        return $this->applySequentialLessonLocksToModules(
-            $formatted,
-            $this->shouldApplyLessonLocksForUser($user, $course)
-        );
+        return $this->lockModulesForAccessLevel($formatted, $user, $course);
     }
 
     /**
@@ -2024,49 +2110,76 @@ class LmsCatalogService
             return false;
         }
 
-        if ($user->id > 0 && ! $this->userCanAccessCourseLessons($user, $course)) {
+        $level = $this->userLmsAccessLevel($user, $course);
+        if ($user->id > 0 && $level === 'none') {
             return true;
         }
 
-        if (! $this->shouldApplyLessonLocksForUser($user, $course)) {
-            return false;
-        }
-
         $map = $this->curriculumLockMapForUser($user, $course);
+        if ($level === 'replay' && ! array_key_exists($itemKey, $map)) {
+            return true;
+        }
 
         return (bool) ($map[$itemKey] ?? false);
     }
 
-    public function curriculumAccessDeniedMessage(User $user, Course $course): ?string
+    /**
+     * @param  string|null  $kind  quiz | assignment | video | document | stream | zoom | live
+     */
+    public function curriculumAccessDeniedMessage(User $user, Course $course, ?string $kind = null): ?string
     {
-        if ($user->id <= 0 || $this->userCanAccessCourseLessons($user, $course)) {
+        $level = $this->userLmsAccessLevel($user, $course);
+        if ($level === 'full') {
             return null;
         }
 
-        if ($this->userHasApprovedEnrollmentForCourse($user, $course)) {
-            return 'This curriculum is available to students enrolled in online class.';
+        if ($level === 'replay') {
+            if ($kind === null || $kind === 'video') {
+                return null;
+            }
+
+            return 'Blended learning enrollments can replay lecture videos only.';
         }
 
-        return 'Only learners with an approved online enrollment can access lessons for this course.';
+        if ($this->userHasApprovedEnrollmentForCourse($user, $course)) {
+            return 'Face to face enrollments cannot access online course materials. Pure online class has full access. Blended learning can replay lecture videos only.';
+        }
+
+        if ($this->userHasApprovedProgramEnrollment($user, $course)) {
+            return 'Request access to this course from the program page. An administrator must approve it before you can open lessons.';
+        }
+
+        return 'Only learners with an approved program enrollment and course access can open these materials.';
     }
 
-    public function userCanAccessCourseLessons(User $user, Course $course): bool
+    public function userLmsAccessLevel(User $user, Course $course): string
     {
         if ($user->id <= 0) {
-            return false;
+            return 'none';
         }
 
         $role = strtolower((string) ($user->role ?? ''));
         if (in_array($role, ['admin', 'instructor'], true)) {
-            return true;
+            return 'full';
         }
 
-        $enrollments = $this->approvedEnrollmentsForCourse($user, $course);
-        if ($enrollments->isEmpty()) {
-            return false;
+        $best = 'none';
+        foreach ($this->approvedEnrollmentsForCourse($user, $course) as $enrollment) {
+            $tier = $this->enrollmentDigitalAccessTier($enrollment);
+            if ($tier === 'full') {
+                return 'full';
+            }
+            if ($tier === 'replay') {
+                $best = 'replay';
+            }
         }
 
-        return $enrollments->contains(fn (Enrollment $e) => $this->enrollmentIsOnlineLearningMode($e));
+        return $best;
+    }
+
+    public function userCanAccessCourseLessons(User $user, Course $course): bool
+    {
+        return $this->userLmsAccessLevel($user, $course) !== 'none';
     }
 
     /**
@@ -2083,13 +2196,7 @@ class LmsCatalogService
             ->with('learningMode')
             ->where('user_id', $user->id)
             ->approved()
-            ->where(function ($q) use ($course) {
-                $q->where('course_id', $course->id)
-                    ->orWhere(function ($q2) use ($course) {
-                        $q2->whereNull('course_id')
-                            ->where('program_id', $course->program_id);
-                    });
-            })
+            ->where('course_id', $course->id)
             ->get();
     }
 
@@ -2098,17 +2205,34 @@ class LmsCatalogService
         return $this->approvedEnrollmentsForCourse($user, $course)->isNotEmpty();
     }
 
-    protected function enrollmentIsOnlineLearningMode(Enrollment $e): bool
+    protected function userHasApprovedProgramEnrollment(User $user, Course $course): bool
+    {
+        if ($user->id <= 0 || $course->program_id === null) {
+            return false;
+        }
+
+        return Enrollment::query()
+            ->where('user_id', $user->id)
+            ->where('program_id', $course->program_id)
+            ->whereNull('course_id')
+            ->approved()
+            ->exists();
+    }
+
+    protected function enrollmentDigitalAccessTier(Enrollment $e): string
     {
         $e->loadMissing('learningMode');
-        if ($e->learningMode instanceof LearningMode && $e->learningMode->isOnlineClass()) {
-            return true;
+        if ($e->learningMode instanceof LearningMode) {
+            return LearningMode::digitalAccessTier(
+                (string) $e->learningMode->public_id,
+                (string) ($e->learningMode->name ?? '')
+            );
         }
 
         $formData = is_array($e->form_data) ? $e->form_data : [];
         $labels = is_array($formData['labels'] ?? null) ? $formData['labels'] : [];
 
-        return LearningMode::looksLikeOnlineClass(
+        return LearningMode::digitalAccessTier(
             (string) ($formData['learningModeId'] ?? ''),
             (string) ($labels['learningMode'] ?? '')
         );
@@ -2130,12 +2254,15 @@ class LmsCatalogService
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function quizResultsForUser(User $target): array
+    public function quizResultsForUser(User $target, ?string $from = null, ?string $to = null): array
     {
-        return QuizAttempt::query()
+        $query = QuizAttempt::query()
             ->with('quiz')
             ->where('user_id', $target->id)
-            ->orderByDesc('attempted_on')
+            ->orderByDesc('attempted_on');
+        ExportDateRange::constrain($query, $from, $to, 'attempted_on');
+
+        return $query
             ->get()
             ->map(fn (QuizAttempt $a) => $this->formatQuizAttempt($a))
             ->all();
@@ -2157,16 +2284,29 @@ class LmsCatalogService
             return false;
         }
 
-        return $this->userCanAccessCourseLessons($user, $course);
+        if ($this->userLmsAccessLevel($user, $course) !== 'none') {
+            return true;
+        }
+
+        if ($user->id > 0 && $this->userHasApprovedEnrollmentForCourse($user, $course)) {
+            return true;
+        }
+
+        return $user->id > 0
+            && AssignmentAttempt::query()
+                ->where('assignment_id', $assignment->id)
+                ->where('user_id', $user->id)
+                ->exists();
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function assignmentSummariesForStaff(): array
+    public function assignmentSummariesForStaff(?string $from = null, ?string $to = null): array
     {
-        $assignments = Assignment::query()
+        $query = Assignment::query()
             ->with('course')
-            ->orderBy('title')
-            ->get();
+            ->orderBy('title');
+        ExportDateRange::constrain($query, $from, $to);
+        $assignments = $query->get();
 
         if ($assignments->isEmpty()) {
             return [];
@@ -2264,16 +2404,29 @@ class LmsCatalogService
             return false;
         }
 
-        return $this->userCanAccessCourseLessons($user, $course);
+        if ($this->userLmsAccessLevel($user, $course) !== 'none') {
+            return true;
+        }
+
+        if ($user->id > 0 && $this->userHasApprovedEnrollmentForCourse($user, $course)) {
+            return true;
+        }
+
+        return $user->id > 0
+            && QuizAttempt::query()
+                ->where('quiz_id', $quiz->id)
+                ->where('user_id', $user->id)
+                ->exists();
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function quizSummariesForStaff(): array
+    public function quizSummariesForStaff(?string $from = null, ?string $to = null): array
     {
-        $quizzes = Quiz::query()
+        $query = Quiz::query()
             ->with('course')
-            ->orderBy('title')
-            ->get();
+            ->orderBy('title');
+        ExportDateRange::constrain($query, $from, $to);
+        $quizzes = $query->get();
 
         if ($quizzes->isEmpty()) {
             return [];
@@ -2493,7 +2646,14 @@ class LmsCatalogService
         }
 
         $passingGrade = $this->quizPassingGrade($quiz);
-        $enrolledUserIds = $this->enrolledUserIdsForCourse($course);
+        $attemptUserIds = QuizAttempt::query()
+            ->where('quiz_id', $quiz->id)
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+        $enrolledUserIds = $this->leaderboardStudentIdsForCourse($course, $attemptUserIds);
         $aliasByUserId = $useAliasNames
             ? $this->aliasNamesByUserIdForCourse($course, $enrolledUserIds)
             : [];
@@ -2540,13 +2700,15 @@ class LmsCatalogService
             $durationSeconds = (int) ($attempt->duration_used_seconds > 0
                 ? $attempt->duration_used_seconds
                 : $this->parseAssignmentDurationLabelToSeconds($attempt->duration_used_label));
+            $aliasName = trim((string) ($aliasByUserId[(int) $user->id] ?? ''));
             $displayName = $useAliasNames
-                ? (string) ($aliasByUserId[(int) $user->id] ?? $user->name)
+                ? ($aliasName !== '' ? $aliasName : (string) $user->name)
                 : (string) $user->name;
 
             $rows[] = [
                 'id' => (string) ($user->public_uid ?: 'user-'.$user->id),
                 'name' => $displayName,
+                'aliasName' => $aliasName !== '' ? $aliasName : null,
                 'email' => $useAliasNames ? null : (string) $user->email,
                 'score' => $score,
                 'scoreLabel' => "{$score}%",
@@ -2634,17 +2796,9 @@ class LmsCatalogService
     /** @return array<int, int> */
     protected function enrolledUserIdsForCourse(Course $course): array
     {
-        if ($course->program_id === null) {
-            return [];
-        }
-
         $enrolledUserIds = Enrollment::query()
             ->approved()
-            ->where('program_id', $course->program_id)
-            ->where(function ($q) use ($course) {
-                $q->whereNull('course_id')
-                    ->orWhere('course_id', $course->id);
-            })
+            ->where('course_id', $course->id)
             ->pluck('user_id')
             ->unique()
             ->map(fn ($id) => (int) $id)
@@ -2657,6 +2811,34 @@ class LmsCatalogService
 
         return User::query()
             ->whereIn('id', $enrolledUserIds)
+            ->whereRaw('LOWER(TRIM(role)) = ?', ['student'])
+            ->orderBy('name')
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Students enrolled in the course, plus students who already submitted an attempt.
+     *
+     * @param  array<int, int>  $attemptUserIds
+     * @return array<int, int>
+     */
+    protected function leaderboardStudentIdsForCourse(Course $course, array $attemptUserIds = []): array
+    {
+        $ids = array_values(array_unique(array_filter(array_merge(
+            $this->enrolledUserIdsForCourse($course),
+            array_map(static fn ($id) => (int) $id, $attemptUserIds)
+        ))));
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return User::query()
+            ->whereIn('id', $ids)
             ->whereRaw('LOWER(TRIM(role)) = ?', ['student'])
             ->orderBy('name')
             ->orderBy('id')
@@ -2811,7 +2993,14 @@ class LmsCatalogService
         }
 
         $passingGrade = $this->assignmentPassingGrade($assignment);
-        $enrolledUserIds = $this->enrolledUserIdsForCourse($course);
+        $attemptUserIds = AssignmentAttempt::query()
+            ->where('assignment_id', $assignment->id)
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+        $enrolledUserIds = $this->leaderboardStudentIdsForCourse($course, $attemptUserIds);
         $aliasByUserId = $useAliasNames
             ? $this->aliasNamesByUserIdForCourse($course, $enrolledUserIds)
             : [];
@@ -2858,13 +3047,15 @@ class LmsCatalogService
             $durationSeconds = (int) ($attempt->duration_used_seconds > 0
                 ? $attempt->duration_used_seconds
                 : $this->parseAssignmentDurationLabelToSeconds($attempt->duration_used_label));
+            $aliasName = trim((string) ($aliasByUserId[(int) $user->id] ?? ''));
             $displayName = $useAliasNames
-                ? (string) ($aliasByUserId[(int) $user->id] ?? $user->name)
+                ? ($aliasName !== '' ? $aliasName : (string) $user->name)
                 : (string) $user->name;
 
             $rows[] = [
                 'id' => (string) ($user->public_uid ?: 'user-'.$user->id),
                 'name' => $displayName,
+                'aliasName' => $aliasName !== '' ? $aliasName : null,
                 'email' => $useAliasNames ? null : (string) $user->email,
                 'score' => $score,
                 'scoreLabel' => "{$score}%",
@@ -3077,25 +3268,14 @@ class LmsCatalogService
             ->with(['course'])
             ->where('user_id', $user->id)
             ->approved()
+            ->whereNotNull('course_id')
             ->get();
 
         $courseIds = collect();
 
         foreach ($enrollments as $enrollment) {
-            if ($enrollment->course_id && $enrollment->course) {
-                if ($enrollment->course->is_published) {
-                    $courseIds->push((int) $enrollment->course_id);
-                }
-
-                continue;
-            }
-
-            if ($enrollment->program_id && ! $enrollment->course_id) {
-                $ids = Course::query()
-                    ->where('program_id', $enrollment->program_id)
-                    ->where('is_published', true)
-                    ->pluck('id');
-                $courseIds = $courseIds->merge($ids);
+            if ($enrollment->course_id && $enrollment->course && $enrollment->course->is_published) {
+                $courseIds->push((int) $enrollment->course_id);
             }
         }
 
@@ -3356,18 +3536,19 @@ class LmsCatalogService
     }
 
     /** @return array<int, array<string, mixed>> */
-    public function leaderboardForPeriod(string $period): array
+    public function leaderboardForPeriod(string $period, ?string $from = null, ?string $to = null): array
     {
         if (! in_array($period, LmsMeta::LEADERBOARD_PERIODS, true)) {
             abort(422, 'Invalid leaderboard type.');
         }
 
-        $cacheKey = 'lms:leaderboard:'.$period;
-
-        return Cache::remember($cacheKey, now()->addSeconds(45), function () use ($period) {
-            return LeaderboardEntry::query()
+        $build = function () use ($period, $from, $to) {
+            $query = LeaderboardEntry::query()
                 ->where('period', $period)
-                ->orderBy('rank_order')
+                ->orderBy('rank_order');
+            ExportDateRange::constrain($query, $from, $to, 'updated_at');
+
+            return $query
                 ->get()
                 ->map(fn ($row) => [
                     'id' => 'rank-'.$row->id,
@@ -3378,7 +3559,15 @@ class LmsCatalogService
                 ])
                 ->values()
                 ->all();
-        });
+        };
+
+        if ($from || $to) {
+            return $build();
+        }
+
+        $cacheKey = 'lms:leaderboard:'.$period;
+
+        return Cache::remember($cacheKey, now()->addSeconds(45), $build);
     }
 
     public function analyticsForUser(User $user): array
@@ -3448,6 +3637,7 @@ class LmsCatalogService
             'phoneNumber' => $student?->phone_number,
             'birthday' => optional($student?->birthday)->format('Y-m-d'),
             'schoolHeld' => $student?->school_held,
+            'aliasName' => $student?->alias_name,
             'position' => $instructor?->position,
             'bio' => $instructor?->bio,
             'facebook' => $instructor?->facebook,
@@ -3810,6 +4000,7 @@ class LmsCatalogService
             'status' => $c->is_published ? 'published' : 'draft',
             'isPublished' => (bool) $c->is_published,
             'canAccessLessons' => $this->userCanAccessCourseLessons($user, $c),
+            'lmsAccess' => $this->userLmsAccessLevel($user, $c),
             'averageRating' => $c->average_rating !== null ? round((float) $c->average_rating, 1) : null,
             ...($c->video_hours_label ? ['videoHoursLabel' => $c->video_hours_label] : []),
             ...($c->preview_completed ? ['previewCompleted' => true] : []),
@@ -3869,12 +4060,7 @@ class LmsCatalogService
             ->map(fn ($m) => $this->formatModule($m, $user))
             ->all();
 
-        $lockedModules = $user->id > 0 && ! $this->userCanAccessCourseLessons($user, $course)
-            ? $this->applyEnrollmentLocksToModules($formatted)
-            : $this->applySequentialLessonLocksToModules(
-                $formatted,
-                $this->shouldApplyLessonLocksForUser($user, $course)
-            );
+        $lockedModules = $this->lockModulesForAccessLevel($formatted, $user, $course);
 
         $map = [];
         foreach ($lockedModules as $mod) {
@@ -3890,6 +4076,11 @@ class LmsCatalogService
             foreach ($mod['quizzes'] ?? [] as $quiz) {
                 if (isset($quiz['id'])) {
                     $map[(string) $quiz['id']] = (bool) ($quiz['locked'] ?? false);
+                }
+            }
+            foreach ($mod['assignments'] ?? [] as $assignment) {
+                if (isset($assignment['id'])) {
+                    $map[(string) $assignment['id']] = (bool) ($assignment['locked'] ?? false);
                 }
             }
         }
@@ -3983,14 +4174,9 @@ class LmsCatalogService
         foreach ($byCourse as $coursePublicId => $indices) {
             $course = Course::query()->where('public_id', $coursePublicId)->first();
             $subset = array_map(fn (int $i) => $modules[$i], $indices);
-            if ($course !== null && $user->id > 0 && ! $this->userCanAccessCourseLessons($user, $course)) {
-                $locked = $this->applyEnrollmentLocksToModules($subset);
-            } else {
-                $locked = $this->applySequentialLessonLocksToModules(
-                    $subset,
-                    $course !== null && $this->shouldApplyLessonLocksForUser($user, $course)
-                );
-            }
+            $locked = $course !== null
+                ? $this->lockModulesForAccessLevel($subset, $user, $course)
+                : $this->applySequentialLessonLocksToModules($subset, false);
             foreach ($indices as $pos => $originalIndex) {
                 $out[$originalIndex] = $locked[$pos] ?? $modules[$originalIndex];
             }
@@ -4004,7 +4190,7 @@ class LmsCatalogService
      * @return array<string, mixed>
      */
     /**
-     * Lock every curriculum item when the learner is signed in but not approved on the program.
+     * Lock every curriculum item when the learner is signed in but not approved on this course.
      *
      * @param  array<int, array<string, mixed>>  $modules
      * @return array<int, array<string, mixed>>
@@ -4029,6 +4215,107 @@ class LmsCatalogService
                 $mod['quizzes'] = array_map(
                     fn (array $row) => array_merge($row, ['locked' => true]),
                     $mod['quizzes']
+                );
+            }
+
+            if (is_array($mod['assignments'] ?? null)) {
+                $mod['assignments'] = array_map(
+                    fn (array $row) => array_merge($row, ['locked' => true]),
+                    $mod['assignments']
+                );
+            }
+
+            return $mod;
+        }, $modules);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $modules
+     * @return array<int, array<string, mixed>>
+     */
+    protected function lockModulesForAccessLevel(array $modules, User $user, Course $course): array
+    {
+        $level = $this->userLmsAccessLevel($user, $course);
+        if ($user->id > 0 && $level === 'none') {
+            return $this->applyEnrollmentLocksToModules($modules);
+        }
+
+        $sequential = $this->applySequentialLessonLocksToModules(
+            $modules,
+            $level === 'full' && $this->shouldApplyLessonLocksForUser($user, $course)
+        );
+
+        if ($level === 'replay') {
+            return $this->applyReplayOnlyLocksToModules($sequential);
+        }
+
+        return $sequential;
+    }
+
+    /**
+     * @param  array<string, mixed>  $mod
+     */
+    protected function moduleCoreKind(array $mod): string
+    {
+        if (! empty($mod['streamingOnly'])) {
+            return 'video';
+        }
+
+        $core = is_array($mod['coreResources'] ?? null)
+            ? $mod['coreResources']
+            : (is_array($mod['resources'] ?? null) ? $mod['resources'] : []);
+        foreach ($core as $format) {
+            if (strcasecmp((string) $format, 'Video') === 0) {
+                return 'video';
+            }
+        }
+
+        $step = strtolower((string) ($mod['type'] ?? ''));
+        if (str_contains($step, 'practice') || str_contains($step, 'coach') || str_contains($step, 'final')) {
+            return 'quiz';
+        }
+
+        return 'document';
+    }
+
+    /**
+     * Blended learning: recorded lecture videos stay open; everything else is locked.
+     *
+     * @param  array<int, array<string, mixed>>  $modules
+     * @return array<int, array<string, mixed>>
+     */
+    protected function applyReplayOnlyLocksToModules(array $modules): array
+    {
+        return array_map(function (array $mod) {
+            if (($mod['visible'] ?? true) === false) {
+                return $mod;
+            }
+
+            $mod['coreLocked'] = $this->moduleCoreKind($mod) !== 'video';
+
+            if (is_array($mod['standaloneLessons'] ?? null)) {
+                $mod['standaloneLessons'] = array_map(
+                    function (array $row) {
+                        $kind = strtolower((string) ($row['kind'] ?? ''));
+                        $row['locked'] = $kind !== 'video';
+
+                        return $row;
+                    },
+                    $mod['standaloneLessons']
+                );
+            }
+
+            if (is_array($mod['quizzes'] ?? null)) {
+                $mod['quizzes'] = array_map(
+                    fn (array $row) => array_merge($row, ['locked' => true]),
+                    $mod['quizzes']
+                );
+            }
+
+            if (is_array($mod['assignments'] ?? null)) {
+                $mod['assignments'] = array_map(
+                    fn (array $row) => array_merge($row, ['locked' => true]),
+                    $mod['assignments']
                 );
             }
 
@@ -4592,6 +4879,9 @@ class LmsCatalogService
             'learningModeName' => $e->learningMode?->name ?: ($e->learningMode?->label ?? ''),
             'submittedAt' => optional($e->submitted_at)->format('Y-m-d'),
             'status' => $e->status,
+            'requestKind' => is_array($e->form_data) && ($e->form_data['requestKind'] ?? '') === 'course_access'
+                ? 'course_access'
+                : ($e->course_id ? 'course' : 'program'),
         ];
 
         if ($includeLearner) {
@@ -4600,6 +4890,7 @@ class LmsCatalogService
             $row['userEmail'] = $e->user->email ?? '';
             $row['phoneNumber'] = $student?->phone_number ?? '';
             $row['schoolHeld'] = $student?->school_held ?? '';
+            $row['aliasName'] = $student?->alias_name ?? '';
             $formData = $e->form_data;
             $row['hasFormData'] = is_array($formData) && $formData !== [];
             $this->appendPartialPaymentFields($row, $formData);
@@ -5005,6 +5296,342 @@ class LmsCatalogService
     }
 
     /**
+     * @return list<list<string>>
+     */
+    public function quizStudentProgressForExport(
+        Quiz $quiz,
+        string $status,
+        ?string $search = null,
+        ?string $from = null,
+        ?string $to = null
+    ): array {
+        $payload = $this->quizStudentProgressPaginated($quiz, $status, 1, 100000, $search);
+        $rows = ExportDateRange::filterAssocRows($payload['data'] ?? [], $from, $to, 'attemptedOn');
+
+        return array_map(static function (array $row) {
+            $status = (string) ($row['status'] ?? '');
+            $score = $status === 'pending' || $row['score'] === null ? '—' : ((int) $row['score']).'%';
+            $attempted = $status === 'pending' ? 'Not attempted' : (string) ($row['attemptedOn'] ?? '—');
+            $result = '—';
+            if ($status === 'passed') {
+                $result = 'Passed';
+            } elseif ($status === 'non_passed') {
+                $result = 'Not passed';
+            }
+            if (isset($row['correctAnswers'], $row['totalQuestions']) && $row['correctAnswers'] !== null) {
+                $result = $result === '—'
+                    ? $row['correctAnswers'].' / '.$row['totalQuestions'].' correct'
+                    : $result.' ('.$row['correctAnswers'].' / '.$row['totalQuestions'].' correct)';
+            }
+
+            return [
+                (string) ($row['name'] ?? ''),
+                (string) ($row['email'] ?? ''),
+                $score,
+                $attempted,
+                $result,
+            ];
+        }, $rows);
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function quizLeaderboardForExport(
+        Quiz $quiz,
+        ?string $search = null,
+        bool $useAliasNames = false,
+        ?User $viewer = null,
+        ?string $from = null,
+        ?string $to = null
+    ): array {
+        $payload = $this->quizLeaderboardPaginated($quiz, 1, 100000, $search, $useAliasNames, $viewer);
+        $rows = ExportDateRange::filterAssocRows($payload['data'] ?? [], $from, $to, 'attemptedOn');
+
+        if ($useAliasNames) {
+            return array_map(static fn (array $row) => [
+                (string) ($row['rank'] ?? ''),
+                (string) ($row['name'] ?? ''),
+                (string) ($row['scoreLabel'] ?? (($row['score'] ?? '').'%')),
+                (string) ($row['durationUsed'] ?? ''),
+                (string) ($row['detailLabel'] ?? ((isset($row['passed']) && $row['passed']) ? 'Passed' : 'Failed')),
+            ], $rows);
+        }
+
+        return array_map(static fn (array $row) => [
+            (string) ($row['rank'] ?? ''),
+            (string) ($row['name'] ?? ''),
+            (string) ($row['email'] ?? ''),
+            (string) ($row['scoreLabel'] ?? (($row['score'] ?? '').'%')),
+            (string) ($row['durationUsed'] ?? ''),
+            (string) ($row['detailLabel'] ?? ((isset($row['passed']) && $row['passed']) ? 'Passed' : 'Failed')),
+            (string) ($row['attemptedOn'] ?? ''),
+        ], $rows);
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function assignmentStudentProgressForExport(
+        Assignment $assignment,
+        string $status,
+        ?string $search = null,
+        ?string $from = null,
+        ?string $to = null
+    ): array {
+        $payload = $this->assignmentStudentProgressPaginated($assignment, $status, 1, 100000, $search);
+        $rows = ExportDateRange::filterAssocRows($payload['data'] ?? [], $from, $to, 'attemptedOn');
+
+        return array_map(static function (array $row) {
+            $status = (string) ($row['status'] ?? '');
+            $score = $status === 'pending' || $row['score'] === null ? '—' : ((int) $row['score']).'%';
+            $submitted = $status === 'pending' ? 'Not submitted' : (string) ($row['attemptedOn'] ?? '—');
+            $result = '—';
+            if ($status === 'passed') {
+                $result = 'Passed';
+            } elseif ($status === 'non_passed') {
+                $result = 'Not passed';
+            }
+            if (isset($row['correctAnswers'], $row['totalQuestions']) && $row['correctAnswers'] !== null) {
+                $result = $result === '—'
+                    ? $row['correctAnswers'].' / '.$row['totalQuestions'].' correct'
+                    : $result.' ('.$row['correctAnswers'].' / '.$row['totalQuestions'].' correct)';
+            }
+
+            return [
+                (string) ($row['name'] ?? ''),
+                (string) ($row['email'] ?? ''),
+                $score,
+                $submitted,
+                $result,
+            ];
+        }, $rows);
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function assignmentLeaderboardForExport(
+        Assignment $assignment,
+        ?string $search = null,
+        bool $useAliasNames = false,
+        ?User $viewer = null,
+        ?string $from = null,
+        ?string $to = null
+    ): array {
+        $payload = $this->assignmentLeaderboardPaginated($assignment, 1, 100000, $search, $useAliasNames, $viewer);
+        $rows = ExportDateRange::filterAssocRows($payload['data'] ?? [], $from, $to, 'attemptedOn');
+
+        if ($useAliasNames) {
+            return array_map(static fn (array $row) => [
+                (string) ($row['rank'] ?? ''),
+                (string) ($row['name'] ?? ''),
+                (string) ($row['scoreLabel'] ?? (($row['score'] ?? '').'%')),
+                (string) ($row['durationUsed'] ?? ''),
+                (string) ($row['detailLabel'] ?? ((isset($row['passed']) && $row['passed']) ? 'Passed' : 'Failed')),
+            ], $rows);
+        }
+
+        return array_map(static fn (array $row) => [
+            (string) ($row['rank'] ?? ''),
+            (string) ($row['name'] ?? ''),
+            (string) ($row['email'] ?? ''),
+            (string) ($row['scoreLabel'] ?? (($row['score'] ?? '').'%')),
+            (string) ($row['durationUsed'] ?? ''),
+            (string) ($row['detailLabel'] ?? ((isset($row['passed']) && $row['passed']) ? 'Passed' : 'Failed')),
+            (string) ($row['attemptedOn'] ?? ''),
+        ], $rows);
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function gradebookForExport(Course $course, ?string $from = null, ?string $to = null): array
+    {
+        $payload = $this->gradebookPaginatedForCourse($course, 1, 100000);
+        $rows = ExportDateRange::filterAssocRows($payload['data'] ?? [], $from, $to, 'startedAt');
+
+        return array_map(static fn (array $row) => [
+            (string) ($row['name'] ?? ''),
+            (string) ($row['email'] ?? ''),
+            (string) ($row['lessons'] ?? ''),
+            (string) ($row['quizzes'] ?? ''),
+            (string) ($row['assignments'] ?? ''),
+            (string) ($row['progress'] ?? ''),
+            (string) ($row['startedAt'] ?? ''),
+        ], $rows);
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function quizSummariesForExport(
+        ?string $from = null,
+        ?string $to = null,
+        ?string $search = null,
+        ?string $courseId = null,
+        ?string $status = null
+    ): array {
+        $rows = $this->quizSummariesForStaff($from, $to);
+        $term = $search !== null ? strtolower(trim($search)) : '';
+        $courseHint = $courseId !== null ? trim($courseId) : '';
+        $statusHint = $status !== null ? trim($status) : '';
+
+        $filtered = array_values(array_filter($rows, function (array $row) use ($term, $courseHint, $statusHint) {
+            if ($term !== ''
+                && ! str_contains(strtolower((string) ($row['title'] ?? '')), $term)
+                && ! str_contains(strtolower((string) ($row['course'] ?? '')), $term)
+            ) {
+                return false;
+            }
+            if ($courseHint !== '' && $courseHint !== 'all' && (string) ($row['courseId'] ?? '') !== $courseHint) {
+                return false;
+            }
+            if ($statusHint === 'pending' && (int) ($row['pending'] ?? 0) <= 0) {
+                return false;
+            }
+            if ($statusHint === 'issues' && (int) ($row['nonPassed'] ?? 0) <= 0) {
+                return false;
+            }
+
+            return true;
+        }));
+
+        return array_map(static fn (array $row) => [
+            (string) ($row['title'] ?? ''),
+            (string) ($row['course'] ?? ''),
+            (string) ($row['total'] ?? ''),
+            (string) ($row['passed'] ?? ''),
+            (string) ($row['nonPassed'] ?? ''),
+            (string) ($row['pending'] ?? ''),
+        ], $filtered);
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function assignmentSummariesForExport(
+        ?string $from = null,
+        ?string $to = null,
+        ?string $search = null,
+        ?string $courseId = null,
+        ?string $status = null
+    ): array {
+        $rows = $this->assignmentSummariesForStaff($from, $to);
+        $term = $search !== null ? strtolower(trim($search)) : '';
+        $courseHint = $courseId !== null ? trim($courseId) : '';
+        $statusHint = $status !== null ? trim($status) : '';
+
+        $filtered = array_values(array_filter($rows, function (array $row) use ($term, $courseHint, $statusHint) {
+            if ($term !== ''
+                && ! str_contains(strtolower((string) ($row['title'] ?? '')), $term)
+                && ! str_contains(strtolower((string) ($row['course'] ?? '')), $term)
+            ) {
+                return false;
+            }
+            if ($courseHint !== '' && $courseHint !== 'all' && (string) ($row['courseId'] ?? '') !== $courseHint) {
+                return false;
+            }
+            if ($statusHint === 'pending' && (int) ($row['pending'] ?? 0) <= 0) {
+                return false;
+            }
+            if ($statusHint === 'issues' && (int) ($row['nonPassed'] ?? 0) <= 0) {
+                return false;
+            }
+
+            return true;
+        }));
+
+        return array_map(static fn (array $row) => [
+            (string) ($row['title'] ?? ''),
+            (string) ($row['course'] ?? ''),
+            (string) ($row['total'] ?? ''),
+            (string) ($row['passed'] ?? ''),
+            (string) ($row['nonPassed'] ?? ''),
+            (string) ($row['pending'] ?? ''),
+        ], $filtered);
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function quizResultsForExport(User $target, ?string $from = null, ?string $to = null, ?string $quizPublicId = null): array
+    {
+        $rows = $this->quizResultsForUser($target, $from, $to);
+        $hint = $quizPublicId !== null ? trim($quizPublicId) : '';
+        if ($hint !== '') {
+            $rows = array_values(array_filter(
+                $rows,
+                static fn (array $row) => (string) ($row['quizId'] ?? '') === $hint
+            ));
+        }
+
+        return array_map(static fn (array $row) => [
+            (string) ($row['date'] ?? ''),
+            (string) ($row['quizId'] ?? ''),
+            isset($row['score']) ? ((int) $row['score']).'%' : '',
+            ($row['correctAnswers'] ?? '').'/'.($row['totalQuestions'] ?? ''),
+            (string) ($row['durationUsed'] ?? ''),
+        ], $rows);
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function leaderboardForExport(string $period, ?string $from = null, ?string $to = null): array
+    {
+        $rows = $this->leaderboardForPeriod($period, $from, $to);
+
+        return array_map(static fn (array $row, int $index) => [
+            (string) ($index + 1),
+            (string) ($row['name'] ?? ''),
+            (string) ($row['program'] ?? ''),
+            (string) ($row['score'] ?? ''),
+            (string) ($row['badge'] ?? ''),
+        ], $rows, array_keys($rows));
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function adminUsersForExport(?string $from = null, ?string $to = null): array
+    {
+        $query = User::query()->with('lmsProfile.program')->orderBy('name');
+        ExportDateRange::constrain($query, $from, $to);
+        $users = $query->get();
+
+        return $users->map(function (User $u) {
+            $prog = $u->lmsProfile?->program?->title ?? $u->lmsProfile?->program?->code ?? '';
+
+            return [
+                (string) $u->name,
+                match ($u->role) {
+                    'student' => 'Learner',
+                    'instructor' => 'Instructor',
+                    default => ucfirst((string) $u->role),
+                },
+                (string) $prog,
+                (string) ($u->status ?? 'Active'),
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function adminEnrollmentsForExport(?string $from = null, ?string $to = null): array
+    {
+        $query = Enrollment::query()->with('program')->orderByDesc('submitted_at')->orderByDesc('id');
+        ExportDateRange::constrainCoalesce($query, $from, $to);
+
+        return $query->get()->map(fn (Enrollment $e) => [
+            (string) ($e->program?->title ?? ''),
+            optional($e->submitted_at ?? $e->created_at)->format('Y-m-d') ?? '',
+            (string) ($e->status ?? ''),
+        ])->values()->all();
+    }
+
+    /**
      * @return array{
      *     lessonKeys: array<int, string>,
      *     totalLessons: int,
@@ -5059,18 +5686,14 @@ class LmsCatalogService
     /** @return array<int, string> */
     protected function gradebookStartedAtByUser(Course $course, array $enrolledUserIds): array
     {
-        if ($course->program_id === null || $enrolledUserIds === []) {
+        if ($enrolledUserIds === []) {
             return [];
         }
 
         $rows = Enrollment::query()
             ->approved()
-            ->where('program_id', $course->program_id)
+            ->where('course_id', $course->id)
             ->whereIn('user_id', $enrolledUserIds)
-            ->where(function ($query) use ($course) {
-                $query->whereNull('course_id')
-                    ->orWhere('course_id', $course->id);
-            })
             ->whereNotNull('submitted_at')
             ->orderBy('submitted_at')
             ->get(['user_id', 'submitted_at']);
@@ -5096,12 +5719,8 @@ class LmsCatalogService
 
         return Enrollment::query()
             ->approved()
-            ->where('program_id', $course->program_id)
+            ->where('course_id', $course->id)
             ->whereIn('user_id', $enrolledUserIds)
-            ->where(function ($query) use ($course) {
-                $query->whereNull('course_id')
-                    ->orWhere('course_id', $course->id);
-            })
             ->get(['user_id', 'form_data'])
             ->filter(function (Enrollment $enrollment) {
                 $form = is_array($enrollment->form_data) ? $enrollment->form_data : [];
@@ -5131,22 +5750,39 @@ class LmsCatalogService
      */
     protected function aliasNamesByUserIdForCourse(Course $course, array $userIds): array
     {
-        if ($userIds === [] || $course->program_id === null) {
+        if ($userIds === []) {
             return [];
         }
 
-        $rows = Enrollment::query()
-            ->approved()
-            ->where('program_id', $course->program_id)
+        $aliases = [];
+        $students = Student::query()
             ->whereIn('user_id', $userIds)
-            ->where(function ($query) use ($course) {
-                $query->whereNull('course_id')
-                    ->orWhere('course_id', $course->id);
-            })
+            ->get(['user_id', 'alias_name']);
+
+        foreach ($students as $student) {
+            $alias = trim((string) ($student->alias_name ?? ''));
+            if ($alias !== '') {
+                $aliases[(int) $student->user_id] = $alias;
+            }
+        }
+
+        $missing = [];
+        foreach ($userIds as $userId) {
+            if (! isset($aliases[(int) $userId])) {
+                $missing[] = (int) $userId;
+            }
+        }
+
+        if ($missing === []) {
+            return $aliases;
+        }
+
+        $rows = Enrollment::query()
+            ->whereIn('user_id', $missing)
             ->orderByDesc('submitted_at')
+            ->orderByDesc('id')
             ->get(['user_id', 'form_data']);
 
-        $aliases = [];
         foreach ($rows as $row) {
             $uid = (int) $row->user_id;
             if (isset($aliases[$uid])) {

@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\BankPaymentMethod;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -19,6 +21,30 @@ class BankPaymentMethodAdminController extends Controller
             ->map(fn (BankPaymentMethod $m) => $this->format($m));
 
         return response()->json(['data' => $rows]);
+    }
+
+    public function export(Request $request)
+    {
+        $validated = $request->validate(ExportDateRange::rules());
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        $query = BankPaymentMethod::query()
+            ->orderBy('sort_order')
+            ->orderBy('id');
+        ExportDateRange::constrain($query, $from, $to);
+
+        $rows = $query->get()->map(fn (BankPaymentMethod $m) => [
+            $m->account_name ?? '',
+            $m->bank_name ?? '',
+            $m->account_number ?? '',
+        ])->values()->all();
+
+        return ExcelDownload::make(
+            'Bank methods',
+            ['Account name', 'Bank', 'Account number'],
+            $rows,
+            'bank-payment-methods'
+        );
     }
 
     public function store(Request $request): JsonResponse

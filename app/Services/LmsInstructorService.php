@@ -171,4 +171,58 @@ class LmsInstructorService
             ],
         ];
     }
+
+    /**
+     * @return list<list<string>>
+     */
+    public function instructorsForExport(?string $search = null, ?string $from = null, ?string $to = null): array
+    {
+        $query = Instructor::query()
+            ->with('user')
+            ->join('users', 'users.id', '=', 'instructors.user_id')
+            ->select([
+                'instructors.id',
+                'instructors.user_id',
+                'instructors.achievements',
+                'instructors.display_name',
+                'instructors.position',
+                'instructors.bio',
+                'instructors.facebook',
+                'instructors.linkedin',
+                'instructors.twitter',
+                'instructors.instagram',
+                'instructors.profile_path',
+                'instructors.cover_path',
+                'instructors.created_at',
+                'instructors.updated_at',
+            ])
+            ->orderBy('users.name')
+            ->orderByDesc('instructors.id');
+
+        $term = $search !== null ? trim($search) : '';
+        if ($term !== '') {
+            $like = '%'.addcslashes($term, '%_\\').'%';
+            $query->where(function ($q) use ($like) {
+                $q->where('instructors.achievements', 'like', $like)
+                    ->orWhere('users.name', 'like', $like)
+                    ->orWhere('users.email', 'like', $like)
+                    ->orWhere('users.status', 'like', $like);
+            });
+        }
+
+        \App\Support\ExportDateRange::constrain($query, $from, $to, 'instructors.created_at');
+
+        return $query->get()
+            ->map(function (Instructor $i) {
+                $row = $this->formatInstructor($i);
+
+                return [
+                    $row['name'] ?? '',
+                    $row['email'] ?? '',
+                    $row['status'] ?? '',
+                ];
+            })
+            ->values()
+            ->all();
+    }
 }

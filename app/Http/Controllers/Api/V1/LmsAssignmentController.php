@@ -229,7 +229,7 @@ class LmsAssignmentController extends Controller
             ->firstOrFail();
 
         if ($assignment->course !== null) {
-            if ($message = $catalog->curriculumAccessDeniedMessage($user, $assignment->course)) {
+            if ($message = $catalog->curriculumAccessDeniedMessage($user, $assignment->course, 'assignment')) {
                 return response()->json(['message' => $message], 403);
             }
 

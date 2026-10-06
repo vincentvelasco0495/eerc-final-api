@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Student;
 use App\Models\User;
 use App\Services\LmsStudentService;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use App\Support\StudentProfileValidation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -56,6 +58,25 @@ class LmsStudentController extends Controller
         return response()->json($service->studentsPaginated($page, $perPage, $search));
     }
 
+    public function export(Request $request, LmsStudentService $service)
+    {
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
+            'search' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]));
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        return ExcelDownload::make(
+            'Students',
+            ['Name', 'Alias name', 'Email', 'Status', 'Notes'],
+            $service->studentsForExport(
+                isset($validated['search']) ? (string) $validated['search'] : null,
+                $from,
+                $to
+            ),
+            'students'
+        );
+    }
+
     public function store(Request $request, LmsStudentService $service): JsonResponse
     {
         $validated = $request->validate([
@@ -63,6 +84,7 @@ class LmsStudentController extends Controller
             'email' => ['required', 'string', 'email', 'max:255'],
             'status' => ['nullable', 'in:active,inactive'],
             'notes' => ['nullable', 'string', 'max:65535'],
+            'aliasName' => ['nullable', 'string', 'max:255'],
             'profilePath' => ['nullable', 'string', 'max:2048'],
             'profileImage' => ['sometimes', 'nullable', 'image', 'max:4096'],
         ]);
@@ -104,6 +126,9 @@ class LmsStudentController extends Controller
         $student = Student::query()->create([
             'user_id' => $user->id,
             'notes' => isset($validated['notes']) ? trim((string) $validated['notes']) : null,
+            'alias_name' => isset($validated['aliasName']) && trim((string) $validated['aliasName']) !== ''
+                ? trim((string) $validated['aliasName'])
+                : null,
             'profile_path' => $profilePath,
         ]);
 
@@ -121,6 +146,7 @@ class LmsStudentController extends Controller
             'email' => ['sometimes', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'status' => ['sometimes', 'in:active,inactive'],
             'notes' => ['sometimes', 'nullable', 'string', 'max:65535'],
+            'aliasName' => ['sometimes', 'nullable', 'string', 'max:255'],
             'profilePath' => ['sometimes', 'nullable', 'string', 'max:2048'],
             'profileImage' => ['sometimes', 'nullable', 'image', 'max:4096'],
             'phoneNumber' => ['sometimes', 'nullable', 'string', 'max:32'],
@@ -145,6 +171,11 @@ class LmsStudentController extends Controller
         if (array_key_exists('notes', $validated)) {
             $student->notes = $validated['notes'] !== null
                 ? trim((string) $validated['notes'])
+                : null;
+        }
+        if (array_key_exists('aliasName', $validated)) {
+            $student->alias_name = $validated['aliasName'] !== null && trim((string) $validated['aliasName']) !== ''
+                ? trim((string) $validated['aliasName'])
                 : null;
         }
         if (array_key_exists('profilePath', $validated)) {

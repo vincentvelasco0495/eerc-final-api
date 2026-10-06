@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\ContactFeedbackSubmission;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -38,5 +40,29 @@ class ContactFeedbackAdminController extends Controller
                 'total' => $paginator->total(),
             ],
         ]);
+    }
+
+    public function export(Request $request)
+    {
+        $validated = $request->validate(ExportDateRange::rules());
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        $query = ContactFeedbackSubmission::query()->orderByDesc('id');
+        ExportDateRange::constrain($query, $from, $to);
+
+        $rows = $query->get()->map(fn (ContactFeedbackSubmission $row) => [
+            $row->created_at?->format('Y-m-d H:i') ?? '',
+            $row->name ?? '',
+            $row->email ?? '',
+            $row->phone ?? '',
+            $row->message ?? '',
+        ])->values()->all();
+
+        return ExcelDownload::make(
+            'Feedback',
+            ['Date', 'Name', 'Email', 'Phone', 'Message'],
+            $rows,
+            'contact-feedback'
+        );
     }
 }

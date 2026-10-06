@@ -6,7 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\PackageEnroll;
 use App\Services\EnrollmentSchemaService;
 use App\Services\LmsCatalogService;
-use App\Support\SimpleXlsx;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -74,6 +75,50 @@ class LmsPackageEnrollController extends Controller
         return response()->json(['data' => $rows]);
     }
 
+    public function export(Request $request)
+    {
+        EnrollmentSchemaService::ensurePackageEnrollIdColumn();
+
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
+            'search' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]));
+        $search = isset($validated['search']) ? trim((string) $validated['search']) : '';
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        $query = PackageEnroll::query()
+            ->orderBy('sort_order')
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id');
+
+        if ($search !== '') {
+            $like = '%'.addcslashes($search, '%_\\').'%';
+            $query->where(function ($q) use ($like) {
+                $q->where('name', 'like', $like)
+                    ->orWhere('description', 'like', $like);
+
+                if (Schema::hasColumn('package_enrolls', 'label')) {
+                    $q->orWhere('label', 'like', $like);
+                }
+            });
+        }
+
+        ExportDateRange::constrain($query, $from, $to);
+
+        $rows = $query->get()->map(fn (PackageEnroll $row) => [
+            $row->name ?? '',
+            $row->status ?? 'active',
+            (int) $row->sort_order,
+            ExcelDownload::plain($row->description),
+        ])->values()->all();
+
+        return ExcelDownload::make(
+            'Packages',
+            ['Name', 'Status', 'Sort order', 'Description'],
+            $rows,
+            'package-enrolls'
+        );
+    }
+
     public function applicants(Request $request, string $publicId, LmsCatalogService $catalog): JsonResponse
     {
         EnrollmentSchemaService::ensurePackageEnrollIdColumn();
@@ -110,13 +155,14 @@ class LmsPackageEnrollController extends Controller
 
         $package = PackageEnroll::query()->where('public_id', $publicId)->firstOrFail();
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
             'search' => ['sometimes', 'nullable', 'string', 'max:255'],
             'status' => ['sometimes', 'nullable', 'string', 'in:pending,approved,rejected,hold'],
             'program' => ['sometimes', 'nullable', 'string', 'max:64'],
             'batch' => ['sometimes', 'nullable', 'string', 'max:64'],
             'branch' => ['sometimes', 'nullable', 'string', 'max:64'],
-        ]);
+        ]));
+        [$from, $to] = ExportDateRange::extract($validated);
 
         $headers = $catalog->packageEnrollApplicantExportHeaders();
         $rows = $catalog->packageEnrollApplicantsForExport(
@@ -125,17 +171,12 @@ class LmsPackageEnrollController extends Controller
             isset($validated['status']) ? (string) $validated['status'] : null,
             isset($validated['program']) ? (string) $validated['program'] : null,
             isset($validated['batch']) ? (string) $validated['batch'] : null,
-            isset($validated['branch']) ? (string) $validated['branch'] : null
+            isset($validated['branch']) ? (string) $validated['branch'] : null,
+            $from,
+            $to
         );
-        $binary = SimpleXlsx::build('Applicants', $headers, $rows);
-        $filename = 'package-enroll-applicants-'.now()->format('Y-m-d').'.xlsx';
 
-        return response($binary, 200, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
-            'Access-Control-Expose-Headers' => 'Content-Disposition',
-            'Cache-Control' => 'no-store, no-cache, must-revalidate',
-        ]);
+        return ExcelDownload::make('Applicants', $headers, $rows, 'package-enroll-applicants');
     }
 
     public function store(Request $request): JsonResponse

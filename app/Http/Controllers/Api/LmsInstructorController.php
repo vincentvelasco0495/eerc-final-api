@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Instructor;
 use App\Models\User;
 use App\Services\LmsInstructorService;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use App\Support\HttpCache;
 use App\Support\LmsCache;
 use App\Support\PageAuthorization;
@@ -66,6 +68,29 @@ class LmsInstructorController extends Controller
         $search = isset($validated['search']) ? (string) $validated['search'] : null;
 
         return response()->json($service->instructorsPaginated($page, $perPage, $search));
+    }
+
+    public function export(Request $request, LmsInstructorService $service)
+    {
+        if ($response = PageAuthorization::denyUnlessCanAccess($request, '/setting-instructor')) {
+            return $response;
+        }
+
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
+            'search' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]));
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        return ExcelDownload::make(
+            'Instructors',
+            ['Name', 'Email', 'Status'],
+            $service->instructorsForExport(
+                isset($validated['search']) ? (string) $validated['search'] : null,
+                $from,
+                $to
+            ),
+            'instructors'
+        );
     }
 
     public function store(Request $request, LmsInstructorService $service): JsonResponse

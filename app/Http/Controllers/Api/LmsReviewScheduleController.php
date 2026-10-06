@@ -8,7 +8,8 @@ use App\Models\Enrollment;
 use App\Models\ReviewSchedule;
 use App\Services\EnrollmentSchemaService;
 use App\Services\LmsCatalogService;
-use App\Support\SimpleXlsx;
+use App\Support\ExcelDownload;
+use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -86,6 +87,50 @@ class LmsReviewScheduleController extends Controller
         return response()->json(['data' => $rows]);
     }
 
+    public function export(Request $request)
+    {
+        EnrollmentSchemaService::ensureReviewScheduleIdColumn();
+
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
+            'search' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]));
+        $search = isset($validated['search']) ? trim((string) $validated['search']) : '';
+        [$from, $to] = ExportDateRange::extract($validated);
+
+        $query = ReviewSchedule::query()
+            ->with('branchEnroll:id,public_id,name')
+            ->orderBy('sort_order')
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id');
+
+        if ($search !== '') {
+            $like = '%'.addcslashes($search, '%_\\').'%';
+            $query->where(function ($q) use ($like) {
+                $q->where('name', 'like', $like)
+                    ->orWhere('description', 'like', $like)
+                    ->orWhereHas('branchEnroll', fn ($branchQuery) => $branchQuery->where('name', 'like', $like));
+            });
+        }
+
+        ExportDateRange::constrain($query, $from, $to);
+
+        $rows = $query->get()->map(fn (ReviewSchedule $row) => [
+            $row->branchEnroll?->name ?? '',
+            $row->name ?? '',
+            (int) ($row->student_capacity ?? 0),
+            $row->status ?? 'active',
+            (int) $row->sort_order,
+            ExcelDownload::plain($row->description),
+        ])->values()->all();
+
+        return ExcelDownload::make(
+            'Schedules',
+            ['Branch', 'Schedule', 'Capacity', 'Status', 'Sort order', 'Description'],
+            $rows,
+            'review-schedules'
+        );
+    }
+
     public function applicants(Request $request, string $publicId, LmsCatalogService $catalog): JsonResponse
     {
         EnrollmentSchemaService::ensureReviewScheduleIdColumn();
@@ -128,13 +173,14 @@ class LmsReviewScheduleController extends Controller
             ->where('public_id', $publicId)
             ->firstOrFail();
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge(ExportDateRange::rules(), [
             'search' => ['sometimes', 'nullable', 'string', 'max:255'],
             'status' => ['sometimes', 'nullable', 'string', 'in:pending,approved,rejected,hold'],
             'program' => ['sometimes', 'nullable', 'string', 'max:64'],
             'batch' => ['sometimes', 'nullable', 'string', 'max:64'],
             'learningMode' => ['sometimes', 'nullable', 'string', 'max:64'],
-        ]);
+        ]));
+        [$from, $to] = ExportDateRange::extract($validated);
 
         $headers = $catalog->reviewScheduleApplicantExportHeaders();
         $rows = $catalog->reviewScheduleApplicantsForExport(
@@ -143,17 +189,12 @@ class LmsReviewScheduleController extends Controller
             isset($validated['status']) ? (string) $validated['status'] : null,
             isset($validated['program']) ? (string) $validated['program'] : null,
             isset($validated['batch']) ? (string) $validated['batch'] : null,
-            isset($validated['learningMode']) ? (string) $validated['learningMode'] : null
+            isset($validated['learningMode']) ? (string) $validated['learningMode'] : null,
+            $from,
+            $to
         );
-        $binary = SimpleXlsx::build('Applicants', $headers, $rows);
-        $filename = 'review-schedule-applicants-'.now()->format('Y-m-d').'.xlsx';
 
-        return response($binary, 200, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
-            'Access-Control-Expose-Headers' => 'Content-Disposition',
-            'Cache-Control' => 'no-store, no-cache, must-revalidate',
-        ]);
+        return ExcelDownload::make('Applicants', $headers, $rows, 'review-schedule-applicants');
     }
 
     public function store(Request $request): JsonResponse
