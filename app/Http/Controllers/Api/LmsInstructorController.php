@@ -6,9 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\Instructor;
 use App\Models\User;
 use App\Services\LmsInstructorService;
+use App\Support\HttpCache;
+use App\Support\LmsCache;
 use App\Support\PageAuthorization;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -36,10 +39,16 @@ class LmsInstructorController extends Controller
         return response()->json(['data' => $data]);
     }
 
-    public function index(Request $request, LmsInstructorService $service): JsonResponse
+    public function index(Request $request, LmsInstructorService $service): JsonResponse|Response
     {
         if (! $request->filled('page')) {
-            return response()->json(['data' => $service->instructors()]);
+            $payload = LmsCache::remember(
+                LmsCache::INSTRUCTORS,
+                LmsCache::CATALOG_TTL,
+                fn () => ['data' => $service->instructors()]
+            );
+
+            return HttpCache::json($payload, 60, false);
         }
 
         if ($response = PageAuthorization::denyUnlessCanAccess($request, '/setting-instructor')) {

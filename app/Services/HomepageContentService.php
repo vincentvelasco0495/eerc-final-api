@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\HomepageSection;
 use Illuminate\Support\Collection;
+use App\Support\LmsCache;
 
 class HomepageContentService
 {
@@ -23,18 +24,34 @@ class HomepageContentService
      */
     public function publicPayload(bool $includeDraft = false): array
     {
+        if ($includeDraft) {
+            return $this->buildPublicPayload(true);
+        }
+
+        return LmsCache::remember(
+            LmsCache::HOMEPAGE_PUBLIC,
+            LmsCache::CMS_TTL,
+            fn () => $this->buildPublicPayload(false)
+        );
+    }
+
+    /**
+     * @return array{sections: array<string, array<string, mixed>>, meta: array<string, mixed>}
+     */
+    protected function buildPublicPayload(bool $includeDraft): array
+    {
         $query = HomepageSection::query()->orderBy('sort_order');
 
         if (! $includeDraft) {
             $query->where('status', 'published');
         }
 
-        $sections = $this->mapSections($query->get(), false, ! $includeDraft);
+        $rows = $query->get();
 
         return [
-            'sections' => $sections,
+            'sections' => $this->mapSections($rows, false, ! $includeDraft),
             'meta' => [
-                'updatedAt' => $this->latestUpdatedAt($query->get()),
+                'updatedAt' => $this->latestUpdatedAt($rows),
             ],
         ];
     }
@@ -77,6 +94,7 @@ class HomepageContentService
             $row->status = $status;
         }
         $row->save();
+        LmsCache::bustCms();
 
         return $this->formatSectionRow($row, true);
     }
@@ -84,6 +102,7 @@ class HomepageContentService
     public function publishAll(): void
     {
         HomepageSection::query()->update(['status' => 'published']);
+        LmsCache::bustCms();
     }
 
     /**

@@ -5,18 +5,20 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Program;
 use App\Services\LmsCatalogService;
+use App\Support\HttpCache;
 use App\Support\PageAuthorization;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class LmsProgramController extends Controller
 {
-    public function index(Request $request, LmsCatalogService $catalog): JsonResponse
+    public function index(Request $request, LmsCatalogService $catalog): JsonResponse|Response
     {
         if (! $request->filled('page')) {
-            return response()->json(['data' => $catalog->programs()]);
+            return HttpCache::json(['data' => $catalog->programs()], 120, true);
         }
 
         if ($response = PageAuthorization::denyUnlessCanAccess($request, '/setting-program')) {
@@ -38,9 +40,9 @@ class LmsProgramController extends Controller
         return response()->json($payload);
     }
 
-    public function stats(string $programPublicId, LmsCatalogService $catalog): JsonResponse
+    public function stats(string $programPublicId, LmsCatalogService $catalog): JsonResponse|Response
     {
-        return response()->json(['data' => $catalog->programStats($programPublicId)]);
+        return HttpCache::json(['data' => $catalog->programStats($programPublicId)], 90, true);
     }
 
     public function store(Request $request, LmsCatalogService $catalog): JsonResponse

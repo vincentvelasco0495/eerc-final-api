@@ -146,6 +146,7 @@ class LessonVideoUploadService
         Storage::disk('local')->makeDirectory('lesson-materials/videos');
         $destAbs = Storage::disk('local')->path($destRel);
         $this->finalizeAssembledFile($uploadId, $total, $destAbs, (int) $meta['size_bytes']);
+        $this->ensureMp4FastStart($destAbs, $ext);
 
         $mime = $this->detectVideoMime($destAbs, (string) $meta['mime']);
 
@@ -182,6 +183,7 @@ class LessonVideoUploadService
         $filename = $uploadId.'.'.$ext;
         $destAbs = $this->cmsPublicAbsolutePath($filename);
         $this->finalizeAssembledFile($uploadId, $total, $destAbs, (int) $meta['size_bytes']);
+        $this->ensureMp4FastStart($destAbs, $ext);
 
         if (! is_file($destAbs) || ! is_readable($destAbs)) {
             abort(500, 'Sample lecture was uploaded but could not be saved to public storage.');
@@ -583,5 +585,51 @@ class LessonVideoUploadService
         }
 
         return 'video/mp4';
+    }
+
+    protected function ensureMp4FastStart(string $absolutePath, string $ext): void
+    {
+        if (strtolower($ext) !== 'mp4' || ! is_file($absolutePath)) {
+            return;
+        }
+
+        $ffmpeg = $this->resolveFfmpegBinary();
+        if ($ffmpeg === null) {
+            return;
+        }
+
+        $tmp = $absolutePath.'.faststart';
+        $null = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
+        $cmd = escapeshellarg($ffmpeg)
+            .' -hide_banner -loglevel error -y -i '.escapeshellarg($absolutePath)
+            .' -c copy -movflags +faststart '.escapeshellarg($tmp)
+            .' 2>'.$null;
+        $code = 1;
+        @exec($cmd, $output, $code);
+        if ((int) $code === 0 && is_file($tmp) && filesize($tmp) > 1000) {
+            @unlink($absolutePath);
+            @rename($tmp, $absolutePath);
+
+            return;
+        }
+        if (is_file($tmp)) {
+            @unlink($tmp);
+        }
+    }
+
+    protected function resolveFfmpegBinary(): ?string
+    {
+        $configured = trim((string) env('FFMPEG_PATH', ''));
+        if ($configured !== '' && is_file($configured)) {
+            return $configured;
+        }
+
+        $probe = PHP_OS_FAMILY === 'Windows' ? 'where ffmpeg' : 'command -v ffmpeg';
+        $lines = [];
+        $code = 1;
+        @exec($probe, $lines, $code);
+        $bin = is_array($lines) && isset($lines[0]) ? trim((string) $lines[0]) : '';
+
+        return $bin !== '' ? $bin : null;
     }
 }

@@ -10,15 +10,31 @@ use App\Models\LearningMode;
 use App\Models\PackageEnroll;
 use App\Models\Program;
 use App\Models\ReviewSchedule;
+use App\Support\HttpCache;
+use App\Support\LmsCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class LmsEnrollmentFormOptionsController extends Controller
 {
-    public function show(Request $request): JsonResponse
+    public function show(Request $request): JsonResponse|Response
     {
         $programPublicId = trim((string) $request->query('programId', ''));
+        $payload = LmsCache::remember(
+            LmsCache::enrollOptionsKey($programPublicId),
+            LmsCache::OPTIONS_TTL,
+            fn () => $this->buildPayload($programPublicId)
+        );
 
+        return HttpCache::json($payload, 60, true);
+    }
+
+    /**
+     * @return array{data: array<string, mixed>}
+     */
+    private function buildPayload(string $programPublicId): array
+    {
         $batchQuery = BatchEnroll::query()
             ->with('program')
             ->where('status', 'active')
@@ -43,12 +59,9 @@ class LmsEnrollmentFormOptionsController extends Controller
                 'tentativeStart' => $row->tentative_start,
                 'description' => $row->description,
                 'sortOrder' => (int) $row->sort_order,
-            ]);
-
-        $learningModes = $this->formatSimpleOptions(LearningMode::class);
-        $branchEnrolls = $this->formatSimpleOptions(BranchEnroll::class);
-        $honorAwardDiscounts = $this->formatSimpleOptions(HonorAwardDiscount::class);
-        $packageEnrolls = $this->formatSimpleOptions(PackageEnroll::class);
+            ])
+            ->values()
+            ->all();
 
         $reviewSchedules = ReviewSchedule::query()
             ->with('branchEnroll')
@@ -64,18 +77,20 @@ class LmsEnrollmentFormOptionsController extends Controller
                 'description' => $row->description,
                 'studentCapacity' => (int) ($row->student_capacity ?? 30),
                 'sortOrder' => (int) $row->sort_order,
-            ]);
+            ])
+            ->values()
+            ->all();
 
-        return response()->json([
+        return [
             'data' => [
                 'batchEnrolls' => $batchEnrolls,
-                'learningModes' => $learningModes,
-                'branchEnrolls' => $branchEnrolls,
+                'learningModes' => $this->formatSimpleOptions(LearningMode::class),
+                'branchEnrolls' => $this->formatSimpleOptions(BranchEnroll::class),
                 'reviewSchedules' => $reviewSchedules,
-                'honorAwardDiscounts' => $honorAwardDiscounts,
-                'packageEnrolls' => $packageEnrolls,
+                'honorAwardDiscounts' => $this->formatSimpleOptions(HonorAwardDiscount::class),
+                'packageEnrolls' => $this->formatSimpleOptions(PackageEnroll::class),
             ],
-        ]);
+        ];
     }
 
     /**

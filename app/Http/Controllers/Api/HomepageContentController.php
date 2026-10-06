@@ -4,13 +4,15 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\HomepageContentService;
+use App\Support\HttpCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Laravel\Sanctum\PersonalAccessToken;
 
 class HomepageContentController extends Controller
 {
-    public function show(Request $request, HomepageContentService $service): JsonResponse
+    public function show(Request $request, HomepageContentService $service): JsonResponse|Response
     {
         $preview = filter_var($request->query('preview'), FILTER_VALIDATE_BOOLEAN);
         $user = $request->user();
@@ -21,7 +23,8 @@ class HomepageContentController extends Controller
         }
 
         $includeDraft = $preview && $user !== null;
+        $payload = $service->publicPayload($includeDraft);
 
-        return response()->json($service->publicPayload($includeDraft));
+        return HttpCache::json($payload, $includeDraft ? 0 : 120, ! $includeDraft);
     }
 }

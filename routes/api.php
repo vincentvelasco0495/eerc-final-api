@@ -48,6 +48,7 @@ use App\Http\Controllers\Api\V1\LmsLessonVideoUploadController;
 use App\Http\Controllers\Api\V1\LmsQuizController;
 use App\Http\Controllers\Api\V1\LmsAssignmentController;
 use App\Http\Controllers\Api\V1\LmsLessonProgressController;
+use App\Support\HttpCache;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -57,7 +58,7 @@ use Illuminate\Support\Facades\Route;
 |--------------------------------------------------------------------------
 */
 
-Route::get('/health', fn () => ['status' => 'ok']);
+Route::get('/health', fn () => HttpCache::json(['status' => 'ok'], 15, true));
 
 Route::middleware('throttle:12,1')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);

@@ -9,8 +9,10 @@ use App\Models\Course;
 use App\Models\Program;
 use App\Models\UserModuleProgress;
 use App\Services\LmsCatalogService;
+use App\Support\HttpCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -74,11 +76,11 @@ class LmsCourseController extends Controller
         ]);
     }
 
-    public function stats(string $coursePublicId, LmsCatalogService $catalog): JsonResponse
+    public function stats(string $coursePublicId, LmsCatalogService $catalog): JsonResponse|Response
     {
-        return response()->json([
+        return HttpCache::json([
             'data' => $catalog->courseStats($coursePublicId),
-        ]);
+        ], 90, true);
     }
 
     /**

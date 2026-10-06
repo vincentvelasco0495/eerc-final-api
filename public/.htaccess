@@ -9,3 +9,11 @@
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
 </IfModule>
+
+<IfModule mod_headers.c>
+    <FilesMatch "\.(mp4|webm|ogg)$">
+        Header set Accept-Ranges bytes
+        Header set Cache-Control "public, max-age=86400"
+        Header set Access-Control-Expose-Headers "Accept-Ranges, Content-Range, Content-Length, Content-Type"
+    </FilesMatch>
+</IfModule>

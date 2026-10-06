@@ -27,9 +27,13 @@ class RangedFileResponse
         }
 
         $isVideo = str_starts_with(strtolower($mime), 'video/');
-        $cacheControl = $publicCache || ! ($inline && $isVideo)
-            ? 'public, max-age=86400'
-            : 'private, no-store';
+        if ($publicCache) {
+            $cacheControl = 'public, max-age=86400';
+        } elseif ($inline && $isVideo) {
+            $cacheControl = 'private, max-age=300';
+        } else {
+            $cacheControl = 'private, max-age=3600';
+        }
 
         $accelPrefix = trim((string) config('lms.video.accel_redirect', ''));
         if ($accelPrefix !== '' && is_string($accelRelativePath) && trim($accelRelativePath) !== '') {

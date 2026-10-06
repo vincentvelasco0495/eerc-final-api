@@ -110,7 +110,9 @@ class CmsMediaUploadController extends Controller
                     $absolutePath,
                     $media->mime ?: 'video/mp4',
                     true,
-                    $media->original_name ?: $filename
+                    $media->original_name ?: $filename,
+                    null,
+                    true
                 );
             }
         }

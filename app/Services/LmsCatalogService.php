@@ -29,6 +29,7 @@ use App\Models\User;
 use App\Models\UserLessonProgress;
 use App\Models\UserModuleProgress;
 use App\Support\LessonMetaSupport;
+use App\Support\LmsCache;
 use App\Support\LmsMeta;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -61,11 +62,13 @@ class LmsCatalogService
 
     public function meta(): array
     {
-        return [
-            'todayLabel' => now()->format('M j, Y'),
-            'leaderboardPeriods' => LmsMeta::LEADERBOARD_PERIODS,
-            'learningFlowSteps' => LmsMeta::LEARNING_FLOW_STEPS,
-        ];
+        return LmsCache::remember(LmsCache::META, 60, function () {
+            return [
+                'todayLabel' => now()->format('M j, Y'),
+                'leaderboardPeriods' => LmsMeta::LEADERBOARD_PERIODS,
+                'learningFlowSteps' => LmsMeta::LEARNING_FLOW_STEPS,
+            ];
+        });
     }
 
     public function userPayload(User $user): array
@@ -80,9 +83,11 @@ class LmsCatalogService
     /** @return array<int, array<string, mixed>> */
     public function programs(): array
     {
-        return Program::query()->orderBy('title')->get()
-            ->map(fn (Program $p) => $this->formatProgram($p))
-            ->all();
+        return LmsCache::remember(LmsCache::PROGRAMS, LmsCache::CATALOG_TTL, function () {
+            return Program::query()->orderBy('title')->get()
+                ->map(fn (Program $p) => $this->formatProgram($p))
+                ->all();
+        });
     }
 
     /**
@@ -1323,6 +1328,7 @@ class LmsCatalogService
     public function programStats(string $programPublicId): array
     {
         /** @var Program $program */
+        return LmsCache::remember(LmsCache::statsKey('program', $programPublicId), LmsCache::STATS_TTL, function () use ($programPublicId) {
         $program = Program::query()->where('public_id', $programPublicId)->firstOrFail();
 
         $courses = Course::query()
@@ -1356,6 +1362,7 @@ class LmsCatalogService
             'totalVideos' => $totalVideos,
             'totalQuizzes' => $totalQuizzes,
         ];
+        });
     }
 
     /**
@@ -1366,6 +1373,7 @@ class LmsCatalogService
     public function courseStats(string $coursePublicId): array
     {
         /** @var Course $course */
+        return LmsCache::remember(LmsCache::statsKey('course', $coursePublicId), LmsCache::STATS_TTL, function () use ($coursePublicId) {
         $course = Course::query()
             ->with(['modules.resources'])
             ->where('public_id', $coursePublicId)
@@ -1401,6 +1409,7 @@ class LmsCatalogService
             'totalAssignments' => $totalAssignments,
             'level' => (string) ($course->level ?? ''),
         ];
+        });
     }
 
     /**

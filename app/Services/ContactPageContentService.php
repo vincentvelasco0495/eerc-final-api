@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ContactPageSection;
 use Illuminate\Support\Collection;
+use App\Support\LmsCache;
 
 class ContactPageContentService
 {
@@ -17,6 +18,22 @@ class ContactPageContentService
      * @return array{sections: array<string, array<string, mixed>>, meta: array<string, mixed>}
      */
     public function publicPayload(bool $includeDraft = false): array
+    {
+        if ($includeDraft) {
+            return $this->buildPublicPayload(true);
+        }
+
+        return LmsCache::remember(
+            LmsCache::CONTACT_PUBLIC,
+            LmsCache::CMS_TTL,
+            fn () => $this->buildPublicPayload(false)
+        );
+    }
+
+    /**
+     * @return array{sections: array<string, array<string, mixed>>, meta: array<string, mixed>}
+     */
+    protected function buildPublicPayload(bool $includeDraft): array
     {
         $query = ContactPageSection::query()->orderBy('sort_order');
 
@@ -72,6 +89,7 @@ class ContactPageContentService
             $row->status = $status;
         }
         $row->save();
+        LmsCache::bustCms();
 
         return $this->formatSectionRow($row, true);
     }
@@ -79,6 +97,7 @@ class ContactPageContentService
     public function publishAll(): void
     {
         ContactPageSection::query()->update(['status' => 'published']);
+        LmsCache::bustCms();
     }
 
     /**

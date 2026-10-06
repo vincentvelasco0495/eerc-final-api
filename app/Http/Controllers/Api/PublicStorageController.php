@@ -28,7 +28,7 @@ class PublicStorageController extends Controller
             if (is_file($webPath) && is_readable($webPath)) {
                 $mime = (string) (@mime_content_type($webPath) ?: 'video/mp4');
 
-                return RangedFileResponse::make($webPath, $mime, true, $basename);
+                return RangedFileResponse::make($webPath, $mime, true, $basename, null, true);
             }
         }
 
@@ -49,7 +49,8 @@ class PublicStorageController extends Controller
                     $mime,
                     true,
                     basename($candidate),
-                    $candidate
+                    $candidate,
+                    str_starts_with(str_replace('\\', '/', $candidate), 'cms/')
                 );
             }
             // Backward compatibility: older uploads may still be on the local disk.
@@ -63,7 +64,9 @@ class PublicStorageController extends Controller
                     $local->path($candidate),
                     $mime,
                     true,
-                    basename($candidate)
+                    basename($candidate),
+                    null,
+                    str_starts_with(str_replace('\\', '/', $candidate), 'cms/')
                 );
             }
         }
