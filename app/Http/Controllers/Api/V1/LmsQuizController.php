@@ -11,6 +11,7 @@ use App\Models\QuestionOption;
 use App\Models\Quiz;
 use App\Models\QuizAttempt;
 use App\Services\LmsCatalogService;
+use App\Services\LmsCurriculumDeleteService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Http\JsonResponse;
@@ -90,6 +91,22 @@ class LmsQuizController extends Controller
             ->all();
 
         return response()->json($items);
+    }
+
+    public function destroy(string $publicId, LmsCatalogService $catalog, LmsCurriculumDeleteService $deleter): JsonResponse
+    {
+        $actor = $this->lmsActor();
+
+        if (! $catalog->userCanViewInstructorDashboard($actor)) {
+            abort(403, 'You do not have permission to delete this quiz.');
+        }
+
+        $quiz = Quiz::query()->where('public_id', $publicId)->firstOrFail();
+        $deleter->softDeleteQuiz($quiz);
+
+        LmsCatalogService::bustUserAnalyticsCache($actor->id);
+
+        return response()->json(['ok' => true]);
     }
 
     /**

@@ -1381,6 +1381,7 @@ class LmsCatalogService
         $totalLectures = (int) $moduleIds->count();
 
         $totalQuizzes = (int) Quiz::query()
+            ->onLiveCurriculum()
             ->whereIn('course_id', $courseIds)
             ->count();
 
@@ -1415,6 +1416,7 @@ class LmsCatalogService
         $moduleIds = $modulesStat->pluck('id');
 
         $totalQuizzes = (int) Quiz::query()
+            ->onLiveCurriculum()
             ->where('course_id', $course->id)
             ->when($moduleIds->isNotEmpty(), function ($query) use ($moduleIds) {
                 $query->where(function ($q) use ($moduleIds) {
@@ -1424,6 +1426,7 @@ class LmsCatalogService
             ->count();
 
         $totalAssignments = (int) Assignment::query()
+            ->onLiveCurriculum()
             ->where('course_id', $course->id)
             ->when($moduleIds->isNotEmpty(), function ($query) use ($moduleIds) {
                 $query->whereIn('module_id', $moduleIds);
@@ -1624,7 +1627,9 @@ class LmsCatalogService
             'Phone',
             'School',
             'Program',
+            'Application type',
             'Course',
+            'Courses',
             'Status',
             'Submitted',
             'Full name',
@@ -1657,9 +1662,19 @@ class LmsCatalogService
         $query = $this->enrollmentsIndexQuery($search);
         ExportDateRange::constrainCoalesce($query, $from, $to);
 
-        return $query
-            ->get()
-            ->map(fn (Enrollment $e) => $this->formatEnrollmentExportRow($e))
+        $enrollments = $query->get();
+        $programIds = $enrollments->pluck('program_id')->filter()->unique()->values()->all();
+        $coursesByProgramId = $programIds === []
+            ? collect()
+            : Course::query()
+                ->whereIn('program_id', $programIds)
+                ->orderBy('title')
+                ->orderBy('id')
+                ->get()
+                ->groupBy(fn (Course $course) => (int) $course->program_id);
+
+        return $enrollments
+            ->map(fn (Enrollment $e) => $this->formatEnrollmentExportRow($e, $coursesByProgramId))
             ->values()
             ->all();
     }
@@ -1758,9 +1773,10 @@ class LmsCatalogService
     }
 
     /**
+     * @param  \Illuminate\Support\Collection<int, \Illuminate\Support\Collection<int, Course>>  $coursesByProgramId
      * @return list<string>
      */
-    protected function formatEnrollmentExportRow(Enrollment $e): array
+    protected function formatEnrollmentExportRow(Enrollment $e, $coursesByProgramId = null): array
     {
         $e->loadMissing(['program', 'course', 'user.studentProfile']);
 
@@ -1768,6 +1784,17 @@ class LmsCatalogService
         $formData = is_array($e->form_data) ? $e->form_data : [];
         $summary = \App\Support\EnrollmentPayments::summarizeFormDataPayments($formData);
         $labels = is_array($formData['labels'] ?? null) ? $formData['labels'] : [];
+        $isCourseAccess = $e->course_id !== null
+            || (is_array($formData) && ($formData['requestKind'] ?? '') === 'course_access');
+        $programCourses = $coursesByProgramId instanceof Collection
+            ? ($coursesByProgramId->get((int) $e->program_id)
+                ?? $coursesByProgramId->get((string) $e->program_id)
+                ?? collect())
+            : collect();
+        $programCourseTitles = $programCourses
+            ->map(fn (Course $course) => trim((string) $course->title))
+            ->filter()
+            ->values();
 
         $gender = match (strtolower(trim((string) ($formData['gender'] ?? '')))) {
             'female' => 'Female',
@@ -1787,7 +1814,9 @@ class LmsCatalogService
             (string) ($student?->phone_number ?? ''),
             (string) ($student?->school_held ?? ''),
             (string) ($e->program?->title ?? ''),
-            (string) ($e->course?->title ?? ($e->course_id === null ? 'All courses' : '')),
+            $isCourseAccess ? 'Course access' : 'Program application',
+            (string) ($e->course?->title ?? ''),
+            $programCourseTitles->implode(', '),
             (string) $e->status,
             (string) optional($e->submitted_at)->format('Y-m-d'),
             (string) ($formData['fullName'] ?? ''),
@@ -2085,6 +2114,7 @@ class LmsCatalogService
         }
 
         $modules = Module::query()
+            ->onLiveCourse()
             ->whereIn('public_id', $publicIds)
             ->with([
                 'resources.lessonMaterials.moduleResource',
@@ -2241,7 +2271,7 @@ class LmsCatalogService
     /** @return array<int, array<string, mixed>> */
     public function quizzesForModuleFilter(User $user, ?string $modulePublicId): array
     {
-        $q = Quiz::query()->with(['course', 'module']);
+        $q = Quiz::query()->onLiveCurriculum()->with(['course', 'module']);
 
         if ($modulePublicId) {
             $module = Module::query()->where('public_id', $modulePublicId)->firstOrFail();
@@ -2249,7 +2279,9 @@ class LmsCatalogService
         }
 
         return $q->withCount('questions')->orderBy('title')->get()
+            ->filter(fn (Quiz $quiz) => $quiz->course !== null)
             ->map(fn (Quiz $quiz) => $this->formatQuiz($quiz, $user))
+            ->values()
             ->all();
     }
 
@@ -2264,7 +2296,9 @@ class LmsCatalogService
 
         return $query
             ->get()
+            ->filter(fn (QuizAttempt $a) => $a->quiz !== null)
             ->map(fn (QuizAttempt $a) => $this->formatQuizAttempt($a))
+            ->values()
             ->all();
     }
 
@@ -2303,6 +2337,7 @@ class LmsCatalogService
     public function assignmentSummariesForStaff(?string $from = null, ?string $to = null): array
     {
         $query = Assignment::query()
+            ->onLiveCurriculum()
             ->with('course')
             ->orderBy('title');
         ExportDateRange::constrain($query, $from, $to);
@@ -2423,6 +2458,7 @@ class LmsCatalogService
     public function quizSummariesForStaff(?string $from = null, ?string $to = null): array
     {
         $query = Quiz::query()
+            ->onLiveCurriculum()
             ->with('course')
             ->orderBy('title');
         ExportDateRange::constrain($query, $from, $to);
@@ -3178,6 +3214,7 @@ class LmsCatalogService
         }
 
         $assignments = Assignment::query()
+            ->onLiveCurriculum()
             ->whereIn('course_id', $courseIds)
             ->with(['course'])
             ->orderByDesc('updated_at')
@@ -3373,6 +3410,7 @@ class LmsCatalogService
         }
 
         $quizzes = Quiz::query()
+            ->onLiveCurriculum()
             ->whereIn('course_id', $courseIds)
             ->with(['course'])
             ->withCount('questions')
@@ -3817,7 +3855,7 @@ class LmsCatalogService
     protected function averageQuizScorePercent(Course $course, User $user, Collection $modulesStat): ?int
     {
         $visibleModuleDbIds = $modulesStat->pluck('id');
-        $query = Quiz::query()->where('course_id', $course->id);
+        $query = Quiz::query()->onLiveCurriculum()->where('course_id', $course->id);
 
         if ($visibleModuleDbIds->isNotEmpty()) {
             $query->where(function ($q) use ($visibleModuleDbIds) {
@@ -4001,6 +4039,8 @@ class LmsCatalogService
             'isPublished' => (bool) $c->is_published,
             'canAccessLessons' => $this->userCanAccessCourseLessons($user, $c),
             'lmsAccess' => $this->userLmsAccessLevel($user, $c),
+            'deleted' => $c->trashed(),
+            'deletedAt' => $c->deleted_at?->toIso8601String(),
             'averageRating' => $c->average_rating !== null ? round((float) $c->average_rating, 1) : null,
             ...($c->video_hours_label ? ['videoHoursLabel' => $c->video_hours_label] : []),
             ...($c->preview_completed ? ['previewCompleted' => true] : []),
@@ -4385,6 +4425,8 @@ class LmsCatalogService
             'progress' => (int) ($progress?->progress_percent ?? 0),
             'visible' => $m->is_visible,
             'streamingOnly' => $m->streaming_only,
+            'deleted' => $m->trashed(),
+            'deletedAt' => $m->deleted_at?->toIso8601String(),
             'updatedAt' => $m->updated_at?->toIso8601String(),
             'resources' => $m->resources->pluck('format')->all(),
             /** Non-standalone resource formats only — used to type the module core lesson. */
@@ -4414,6 +4456,7 @@ class LmsCatalogService
                     'bodyHtml' => filled($r->body_html ?? null) ? $r->body_html : ($r->summary ?? ''),
                     'lessonMeta' => LessonMetaSupport::sanitize($r->lesson_meta_json ?? null),
                     'sortOrder' => (int) $r->sort_order,
+                    'deleted' => false,
                     'completed' => isset($completedSet[(string) $r->public_id]),
                     'lessonMaterials' => $r->lessonMaterials
                         ->filter(fn (LessonMaterial $f) => $this->isListedLessonMaterial($f, $hiddenQuizImageIds))
@@ -4737,7 +4780,7 @@ class LmsCatalogService
 
         return [
             'id' => $q->public_id,
-            'courseId' => $q->course->public_id,
+            'courseId' => $q->course?->public_id ?? '',
             'moduleId' => $q->module?->public_id,
             'title' => $q->title,
             'durationMinutes' => (int) $q->duration_minutes,
@@ -4758,6 +4801,8 @@ class LmsCatalogService
             'quizAttemptHistory' => (bool) ($authoring['quizAttemptHistory'] ?? false),
             'retakeAfterPass' => (bool) ($authoring['retakeAfterPass'] ?? false),
             'limitedRetakeAttempts' => (bool) ($authoring['limitedRetakeAttempts'] ?? false),
+            'deleted' => $q->trashed(),
+            'deletedAt' => $q->deleted_at?->toIso8601String(),
         ];
     }
 
@@ -4841,7 +4886,7 @@ class LmsCatalogService
 
         return [
             'id' => $a->public_id,
-            'courseId' => $a->course->public_id,
+            'courseId' => $a->course?->public_id ?? '',
             'moduleId' => $a->module?->public_id,
             'title' => $a->title,
             'lessonContentHtml' => (string) ($a->content_html ?? ''),
@@ -4856,6 +4901,8 @@ class LmsCatalogService
             'lessonPreview' => (bool) ($authoring['lessonPreview'] ?? false),
             'questionCount' => $this->resolvedAssignmentQuestionCount($a),
             'sortOrder' => (int) $a->sort_order,
+            'deleted' => $a->trashed(),
+            'deletedAt' => $a->deleted_at?->toIso8601String(),
             'materials' => $a->relationLoaded('lessonMaterials')
                 ? $a->lessonMaterials
                     ->map(fn (LessonMaterial $f) => $this->formatLessonMaterial($f, $user))
@@ -5052,7 +5099,7 @@ class LmsCatalogService
         });
     }
 
-    protected function userCanViewInstructorDashboard(User $user): bool
+    public function userCanViewInstructorDashboard(User $user): bool
     {
         $role = strtolower(trim((string) ($user->role ?? '')));
 
@@ -5656,6 +5703,7 @@ class LmsCatalogService
         $lessonKeys = array_values(array_unique($lessonKeys));
 
         $quizzes = Quiz::query()
+            ->onLiveCurriculum()
             ->where('course_id', $course->id)
             ->when($moduleIds !== [], function ($query) use ($moduleIds) {
                 $query->where(function ($sub) use ($moduleIds) {
@@ -5667,6 +5715,7 @@ class LmsCatalogService
             ->get();
 
         $assignments = Assignment::query()
+            ->onLiveCurriculum()
             ->where('course_id', $course->id)
             ->when($moduleIds !== [], fn ($query) => $query->whereIn('module_id', $moduleIds))
             ->orderBy('sort_order')

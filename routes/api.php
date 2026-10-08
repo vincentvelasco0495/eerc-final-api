@@ -204,6 +204,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/standalone-lessons/{publicId}', [LmsModuleController::class, 'updateStandaloneLesson']);
     Route::delete('/standalone-lessons/{publicId}', [LmsModuleController::class, 'destroyStandaloneLesson']);
     Route::patch('/courses/{publicId}', [LmsCourseController::class, 'update']);
+    Route::delete('/courses/{publicId}', [LmsCourseController::class, 'destroy']);
     Route::get('/enrollment-form/options', [LmsEnrollmentFormOptionsController::class, 'show']);
     Route::get('/enrollment-payments/export', [LmsEnrollmentPaymentController::class, 'export']);
     Route::get('/enrollment-payments', [LmsEnrollmentPaymentController::class, 'index']);
@@ -213,6 +214,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/modules/{modulePublicId}/quizzes', [LmsQuizController::class, 'storeForModule']);
     Route::post('/modules/{modulePublicId}/assignments', [LmsAssignmentController::class, 'storeForModule']);
     Route::patch('/quizzes/{publicId}', [LmsQuizController::class, 'update']);
+    Route::delete('/quizzes/{publicId}', [LmsQuizController::class, 'destroy']);
     Route::patch('/assignments/{publicId}', [LmsAssignmentController::class, 'update']);
     Route::delete('/assignments/{publicId}', [LmsAssignmentController::class, 'destroy']);
     Route::get('/courses/{coursePublicId}/lesson-progress', [LmsLessonProgressController::class, 'index']);

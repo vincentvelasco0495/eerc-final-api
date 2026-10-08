@@ -88,7 +88,7 @@ class Enrollment extends Model
 
     public function course(): BelongsTo
     {
-        return $this->belongsTo(Course::class, 'course_id');
+        return $this->belongsTo(Course::class, 'course_id')->withTrashed();
     }
 
     public static function grantsCourseAccess(?string $status): bool

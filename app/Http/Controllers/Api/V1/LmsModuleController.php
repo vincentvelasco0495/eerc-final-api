@@ -10,6 +10,7 @@ use App\Models\Module;
 use App\Models\ModuleResource;
 use App\Models\Quiz;
 use App\Services\LmsCatalogService;
+use App\Services\LmsCurriculumDeleteService;
 use App\Support\LessonMetaSupport;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
@@ -214,37 +215,40 @@ class LmsModuleController extends Controller
         ]);
     }
 
-    /** Remove one standalone curriculum lesson (parent module unchanged). */
-    public function destroyStandaloneLesson(string $publicId): JsonResponse
+    /** Soft-delete one standalone curriculum lesson (parent module unchanged). Video files are removed from disk. */
+    public function destroyStandaloneLesson(string $publicId, LmsCatalogService $catalog, LmsCurriculumDeleteService $deleter): JsonResponse
     {
         $actor = $this->lmsActor();
+
+        if (! $catalog->userCanViewInstructorDashboard($actor)) {
+            abort(403, 'You do not have permission to delete this lesson.');
+        }
 
         $row = ModuleResource::query()
             ->where('public_id', $publicId)
             ->where('is_standalone_lesson', true)
             ->firstOrFail();
 
-        $row->delete();
+        $deleter->softDeleteStandaloneLesson($row);
 
         LmsCatalogService::bustUserAnalyticsCache($actor->id);
 
         return response()->json(['ok' => true]);
     }
 
-    /** Delete a curriculum module (instructor authoring; removes quizzes linked to this module). */
-    public function destroy(string $publicId): JsonResponse
+    /** Soft-delete a curriculum module (quizzes, assignments, and lessons). Video files are removed from disk. */
+    public function destroy(string $publicId, LmsCatalogService $catalog, LmsCurriculumDeleteService $deleter): JsonResponse
     {
         $actor = $this->lmsActor();
+
+        if (! $catalog->userCanViewInstructorDashboard($actor)) {
+            abort(403, 'You do not have permission to delete this module.');
+        }
 
         /** @var Module $module */
         $module = Module::query()->where('public_id', $publicId)->firstOrFail();
 
-        DB::transaction(function () use ($module) {
-            Course::query()->where('next_module_id', $module->id)->update(['next_module_id' => null]);
-            Quiz::query()->where('module_id', $module->id)->delete();
-            Assignment::query()->where('module_id', $module->id)->delete();
-            $module->delete();
-        });
+        $deleter->softDeleteModule($module);
 
         LmsCatalogService::bustUserAnalyticsCache($actor->id);
 

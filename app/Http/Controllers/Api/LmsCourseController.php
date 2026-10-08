@@ -9,7 +9,9 @@ use App\Models\Course;
 use App\Models\Program;
 use App\Models\UserModuleProgress;
 use App\Services\LmsCatalogService;
+use App\Services\LmsCurriculumDeleteService;
 use App\Support\HttpCache;
+use App\Support\LmsCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -385,6 +387,24 @@ class LmsCourseController extends Controller
         return response()->json([
             'data' => $catalog->formatCourse($fresh, $user, $completedMods),
         ]);
+    }
+
+    public function destroy(string $publicId, LmsCatalogService $catalog, LmsCurriculumDeleteService $deleter): JsonResponse
+    {
+        $user = $this->lmsActor();
+
+        if (! $catalog->userCanViewInstructorDashboard($user)) {
+            abort(403, 'You do not have permission to delete this course.');
+        }
+
+        /** @var Course $course */
+        $course = Course::query()->where('public_id', $publicId)->firstOrFail();
+        $deleter->softDeleteCourse($course);
+
+        LmsCatalogService::bustUserAnalyticsCache($user->id);
+        LmsCache::bustCatalog();
+
+        return response()->json(['message' => 'Course deleted.']);
     }
 
     /**

@@ -8,13 +8,12 @@ use App\Models\Assignment;
 use App\Models\AssignmentAttempt;
 use App\Models\AssignmentQuestion;
 use App\Models\AssignmentQuestionOption;
-use App\Models\LessonMaterial;
 use App\Models\Module;
 use App\Services\LmsCatalogService;
+use App\Services\LmsCurriculumDeleteService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class LmsAssignmentController extends Controller
@@ -196,23 +195,16 @@ class LmsAssignmentController extends Controller
         ]);
     }
 
-    public function destroy(string $publicId): JsonResponse
+    public function destroy(string $publicId, LmsCatalogService $catalog, LmsCurriculumDeleteService $deleter): JsonResponse
     {
         $actor = $this->lmsActor();
 
+        if (! $catalog->userCanViewInstructorDashboard($actor)) {
+            abort(403, 'You do not have permission to delete this assignment.');
+        }
+
         $assignment = Assignment::query()->where('public_id', $publicId)->firstOrFail();
-
-        DB::transaction(function () use ($assignment) {
-            $materials = LessonMaterial::query()->where('assignment_id', $assignment->id)->get();
-            foreach ($materials as $material) {
-                if ($material->storage_path && Storage::disk('public')->exists($material->storage_path)) {
-                    Storage::disk('public')->delete($material->storage_path);
-                }
-                $material->delete();
-            }
-
-            $assignment->delete();
-        });
+        $deleter->softDeleteAssignment($assignment);
 
         LmsCatalogService::bustUserAnalyticsCache($actor->id);
 

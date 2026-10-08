@@ -3,11 +3,14 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Module extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'public_id',
         'course_id',
@@ -68,5 +71,11 @@ class Module extends Model
     public function lessonCoreMaterials(): HasMany
     {
         return $this->hasMany(LessonMaterial::class, 'module_id')->whereNull('module_resource_id');
+    }
+
+    /** Hide modules whose parent course has been soft-deleted. */
+    public function scopeOnLiveCourse($query)
+    {
+        return $query->whereHas('course');
     }
 }

@@ -3,11 +3,14 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Assignment extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'public_id',
         'course_id',
@@ -51,5 +54,13 @@ class Assignment extends Model
     public function attempts(): HasMany
     {
         return $this->hasMany(AssignmentAttempt::class, 'assignment_id');
+    }
+
+    /** Hide rows whose course or module has been soft-deleted. */
+    public function scopeOnLiveCurriculum($query)
+    {
+        return $query->whereHas('course')->where(function ($nested) {
+            $nested->whereNull('module_id')->orWhereHas('module');
+        });
     }
 }
