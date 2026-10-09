@@ -53,8 +53,8 @@ class LearningMode extends Model
     }
 
     /**
-     * PURE ONLINE CLASS or BLENDED LEARNING may use LMS lesson tabs.
-     * FACE TO FACE CLASS cannot.
+     * Pure online and blended learning get every LMS tab.
+     * Face to face may use quiz, handouts, and group study (not lecture videos).
      */
     public function grantsDigitalLessonAccess(): bool
     {
@@ -68,10 +68,7 @@ class LearningMode extends Model
     {
         $id = strtolower(trim($publicId));
         $label = strtolower(trim($name));
-        if (str_contains($id, 'blended') || str_contains($label, 'blended')) {
-            return false;
-        }
-        if (preg_match('/face[\s-]*to[\s-]*face/', $id) || preg_match('/face[\s-]*to[\s-]*face/', $label)) {
+        if (static::looksLikeBlendedClass($publicId, $name) || static::looksLikeFaceToFaceClass($publicId, $name)) {
             return false;
         }
 
@@ -86,23 +83,41 @@ class LearningMode extends Model
         return str_contains($id, 'blended') || str_contains($label, 'blended');
     }
 
+    public static function looksLikeFaceToFaceClass(string $publicId, string $name): bool
+    {
+        if (static::looksLikeBlendedClass($publicId, $name)) {
+            return false;
+        }
+
+        $id = strtolower(trim($publicId));
+        $label = strtolower(trim($name));
+        if (preg_match('/face[\s-]*to[\s-]*face/', $id) || preg_match('/face[\s-]*to[\s-]*face/', $label)) {
+            return true;
+        }
+        if (preg_match('/\bf2f\b/', $id) || preg_match('/\bf2f\b/', $label)) {
+            return true;
+        }
+
+        return $id === 'learning-mode-face' || str_ends_with($id, '-face');
+    }
+
     public static function looksLikeDigitalLessonAccess(string $publicId, string $name): bool
     {
         return static::digitalAccessTier($publicId, $name) !== 'none';
     }
 
     /**
-     * `full` — Pure online class (all LMS tabs).
-     * `replay` — Blended learning (lecture video / replay only).
-     * `none` — Face to face, or unrecognized.
+     * `full` — Pure online class and blended learning (all LMS tabs).
+     * `classroom` — Face to face (quiz / handouts / group study; no lecture video).
+     * `none` — Unrecognized.
      */
     public static function digitalAccessTier(string $publicId, string $name): string
     {
-        if (static::looksLikeBlendedClass($publicId, $name)) {
-            return 'replay';
-        }
-        if (static::looksLikeOnlineClass($publicId, $name)) {
+        if (static::looksLikeBlendedClass($publicId, $name) || static::looksLikeOnlineClass($publicId, $name)) {
             return 'full';
+        }
+        if (static::looksLikeFaceToFaceClass($publicId, $name)) {
+            return 'classroom';
         }
 
         return 'none';
@@ -118,7 +133,14 @@ class LearningMode extends Model
             return null;
         }
 
-        $id = static::query()->where('public_id', $publicId)->value('id');
+        $candidates = [$publicId];
+        if ($publicId === 'learning-mode-face') {
+            $candidates[] = 'learning-mode-face-to-face';
+        } elseif ($publicId === 'learning-mode-face-to-face') {
+            $candidates[] = 'learning-mode-face';
+        }
+
+        $id = static::query()->whereIn('public_id', $candidates)->value('id');
 
         return $id ? (int) $id : null;
     }

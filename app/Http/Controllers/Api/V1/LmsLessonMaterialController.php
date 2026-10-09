@@ -120,6 +120,10 @@ class LmsLessonMaterialController extends Controller
             return response()->json(['message' => 'Lesson material not found.'], 404);
         }
 
+        if ($denied = $this->videoPlaybackDeniedResponse($actor, $row)) {
+            return $denied;
+        }
+
         $ttl = (int) config('lms.video.playback_ttl', 28800);
         $token = LessonPlaybackToken::issue($publicId, $ttl);
         $path = '/api/lesson-materials/'.rawurlencode($publicId).'/file?inline=1&play='.rawurlencode($token);
@@ -182,6 +186,33 @@ class LmsLessonMaterialController extends Controller
             $row->original_name,
             $accelRel
         );
+    }
+
+    protected function videoPlaybackDeniedResponse($actor, LessonMaterial $row): ?JsonResponse
+    {
+        if ($row->assignment_id !== null || $row->isQuizQuestionImage()) {
+            return null;
+        }
+
+        $mime = is_string($row->mime) && trim($row->mime) !== ''
+            ? trim((string) $row->mime)
+            : '';
+        if (! str_starts_with(strtolower($mime), 'video/')) {
+            return null;
+        }
+
+        $row->loadMissing(['module.course', 'moduleResource.module.course']);
+        $course = $row->module?->course ?? $row->moduleResource?->module?->course;
+        if ($course === null) {
+            return null;
+        }
+
+        $message = app(LmsCatalogService::class)->curriculumAccessDeniedMessage($actor, $course, 'video');
+        if ($message === null) {
+            return null;
+        }
+
+        return response()->json(['message' => $message], 403);
     }
 
     protected function persistUpload(Request $request, ?int $moduleId, ?int $moduleResourceId, ?int $assignmentId = null): JsonResponse

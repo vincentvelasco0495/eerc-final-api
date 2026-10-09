@@ -1719,7 +1719,7 @@ class LmsCatalogService
         ?string $status = null
     ): Builder {
         $query = Enrollment::query()
-            ->with(['program', 'course', 'user.studentProfile'])
+            ->with(['program', 'course', 'learningMode', 'user.studentProfile'])
             ->orderByDesc('submitted_at')
             ->orderByDesc('id');
 
@@ -2168,11 +2168,19 @@ class LmsCatalogService
                 return null;
             }
 
-            return 'Blended learning enrollments can replay lecture videos only.';
+            return 'This enrollment can replay lecture videos only.';
+        }
+
+        if ($level === 'classroom') {
+            if ($kind === 'video') {
+                return 'Face to face enrollments cannot access lecture videos.';
+            }
+
+            return null;
         }
 
         if ($this->userHasApprovedEnrollmentForCourse($user, $course)) {
-            return 'Face to face enrollments cannot access online course materials. Pure online class has full access. Blended learning can replay lecture videos only.';
+            return 'Face to face enrollments cannot access lecture videos. Pure online class and blended learning have access to all course tabs.';
         }
 
         if ($this->userHasApprovedProgramEnrollment($user, $course)) {
@@ -2193,18 +2201,32 @@ class LmsCatalogService
             return 'full';
         }
 
-        $best = 'none';
-        foreach ($this->approvedEnrollmentsForCourse($user, $course) as $enrollment) {
-            $tier = $this->enrollmentDigitalAccessTier($enrollment);
-            if ($tier === 'full') {
-                return 'full';
-            }
-            if ($tier === 'replay') {
-                $best = 'replay';
-            }
+        $courseEnrollments = $this->approvedEnrollmentsForCourse($user, $course);
+        if ($courseEnrollments->isEmpty()) {
+            return 'none';
         }
 
-        return $best;
+        $tiers = [];
+        foreach ($courseEnrollments as $enrollment) {
+            $tiers[] = $this->enrollmentDigitalAccessTier($enrollment);
+        }
+
+        $programEnrollment = $this->approvedProgramEnrollment($user, $course);
+        if ($programEnrollment !== null) {
+            $tiers[] = $this->enrollmentDigitalAccessTier($programEnrollment);
+        }
+
+        if (in_array('classroom', $tiers, true)) {
+            return 'classroom';
+        }
+        if (in_array('full', $tiers, true)) {
+            return 'full';
+        }
+        if (in_array('replay', $tiers, true)) {
+            return 'replay';
+        }
+
+        return 'none';
     }
 
     public function userCanAccessCourseLessons(User $user, Course $course): bool
@@ -2237,16 +2259,23 @@ class LmsCatalogService
 
     protected function userHasApprovedProgramEnrollment(User $user, Course $course): bool
     {
+        return $this->approvedProgramEnrollment($user, $course) !== null;
+    }
+
+    protected function approvedProgramEnrollment(User $user, Course $course): ?Enrollment
+    {
         if ($user->id <= 0 || $course->program_id === null) {
-            return false;
+            return null;
         }
 
         return Enrollment::query()
+            ->with('learningMode')
             ->where('user_id', $user->id)
             ->where('program_id', $course->program_id)
             ->whereNull('course_id')
             ->approved()
-            ->exists();
+            ->orderByDesc('id')
+            ->first();
     }
 
     protected function enrollmentDigitalAccessTier(Enrollment $e): string
@@ -4289,6 +4318,10 @@ class LmsCatalogService
             return $this->applyReplayOnlyLocksToModules($sequential);
         }
 
+        if ($level === 'classroom') {
+            return $this->applyClassroomLocksToModules($sequential);
+        }
+
         return $sequential;
     }
 
@@ -4356,6 +4389,41 @@ class LmsCatalogService
                 $mod['assignments'] = array_map(
                     fn (array $row) => array_merge($row, ['locked' => true]),
                     $mod['assignments']
+                );
+            }
+
+            return $mod;
+        }, $modules);
+    }
+
+    /**
+     * Face to face: recorded lecture videos stay locked; quizzes, handouts, and group study stay open.
+     *
+     * @param  array<int, array<string, mixed>>  $modules
+     * @return array<int, array<string, mixed>>
+     */
+    protected function applyClassroomLocksToModules(array $modules): array
+    {
+        return array_map(function (array $mod) {
+            if (($mod['visible'] ?? true) === false) {
+                return $mod;
+            }
+
+            if ($this->moduleCoreKind($mod) === 'video') {
+                $mod['coreLocked'] = true;
+            }
+
+            if (is_array($mod['standaloneLessons'] ?? null)) {
+                $mod['standaloneLessons'] = array_map(
+                    function (array $row) {
+                        $kind = strtolower((string) ($row['kind'] ?? ''));
+                        if ($kind === 'video') {
+                            $row['locked'] = true;
+                        }
+
+                        return $row;
+                    },
+                    $mod['standaloneLessons']
                 );
             }
 
