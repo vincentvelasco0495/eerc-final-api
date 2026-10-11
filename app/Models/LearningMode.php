@@ -52,6 +52,22 @@ class LearningMode extends Model
         );
     }
 
+    public function isBlendedClass(): bool
+    {
+        return static::looksLikeBlendedClass(
+            (string) $this->public_id,
+            (string) ($this->name ?? '')
+        );
+    }
+
+    public function isFaceToFaceClass(): bool
+    {
+        return static::looksLikeFaceToFaceClass(
+            (string) $this->public_id,
+            (string) ($this->name ?? '')
+        );
+    }
+
     /**
      * Pure online and blended learning get every LMS tab.
      * Face to face may use quiz, handouts, and group study (not lecture videos).

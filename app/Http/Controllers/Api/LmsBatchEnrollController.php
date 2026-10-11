@@ -11,6 +11,7 @@ use App\Support\ExcelDownload;
 use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class LmsBatchEnrollController extends Controller
@@ -182,19 +183,26 @@ class LmsBatchEnrollController extends Controller
 
         $program = Program::query()->where('public_id', trim((string) $validated['programId']))->firstOrFail();
 
-        $publicId = $this->nextPublicId(trim((string) $validated['name']));
+        $name = trim((string) $validated['name']);
+        $publicId = $this->nextPublicId($name);
 
-        $row = BatchEnroll::query()->create([
+        $payload = [
             'public_id' => $publicId,
             'program_id' => $program->id,
-            'name' => trim((string) $validated['name']),
-            'label' => trim((string) $validated['name']),
-            'code' => Str::upper(Str::slug(trim((string) $validated['name']), '_')),
+            'name' => $name,
             'tentative_start' => isset($validated['tentativeStart']) ? trim((string) $validated['tentativeStart']) : null,
             'description' => isset($validated['description']) ? trim((string) $validated['description']) : null,
             'status' => $validated['status'] ?? 'active',
             'sort_order' => isset($validated['sortOrder']) ? (int) $validated['sortOrder'] : 1,
-        ]);
+        ];
+        if (Schema::hasColumn('batch_enrolls', 'label')) {
+            $payload['label'] = $name;
+        }
+        if (Schema::hasColumn('batch_enrolls', 'code')) {
+            $payload['code'] = Str::upper(Str::slug($name !== '' ? $name : 'entry', '_'));
+        }
+
+        $row = BatchEnroll::query()->create($payload);
 
         $row->load('program:id,public_id,title');
 
@@ -219,8 +227,11 @@ class LmsBatchEnrollController extends Controller
             $row->program_id = $program->id;
         }
         if (array_key_exists('name', $validated)) {
-            $row->name = trim((string) $validated['name']);
-            $row->label = trim((string) $validated['name']);
+            $name = trim((string) $validated['name']);
+            $row->name = $name;
+            if (Schema::hasColumn('batch_enrolls', 'label')) {
+                $row->label = $name;
+            }
         }
         if (array_key_exists('tentativeStart', $validated)) {
             $row->tentative_start = $validated['tentativeStart'] !== null
@@ -258,7 +269,7 @@ class LmsBatchEnrollController extends Controller
      */
     private function format(BatchEnroll $row): array
     {
-        $displayName = $row->name ?: $row->label;
+        $displayName = $row->name ?: ($row->label ?? '');
 
         return [
             'id' => $row->public_id,

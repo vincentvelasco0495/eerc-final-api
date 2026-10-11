@@ -210,6 +210,24 @@ class LmsStudentController extends Controller
         return response()->json(['data' => $service->formatStudent($student->fresh()->load('user'))]);
     }
 
+    public function resetPassword(Request $request, string $userPublicUid): JsonResponse
+    {
+        $student = $this->findStudentByUserPublicUid($userPublicUid);
+        $user = $student->user;
+        if ($user === null) {
+            abort(404, 'Student account not found.');
+        }
+
+        $validated = $request->validate([
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $user->password = Hash::make($validated['password']);
+        $user->save();
+
+        return response()->json(['message' => 'Password reset.']);
+    }
+
     public function destroy(string $userPublicUid): JsonResponse
     {
         $student = $this->findStudentByUserPublicUid($userPublicUid);

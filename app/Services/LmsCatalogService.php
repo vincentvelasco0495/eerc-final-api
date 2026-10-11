@@ -1616,6 +1616,25 @@ class LmsCatalogService
     }
 
     /**
+     * Pending, hold, and approved course-access rows for staff course roster.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function courseEnrollmentsForStaff(Course $course): array
+    {
+        return Enrollment::query()
+            ->with(['program', 'course', 'learningMode', 'user.studentProfile'])
+            ->where('course_id', $course->id)
+            ->whereIn('status', ['pending', 'approved', 'hold'])
+            ->orderByDesc('submitted_at')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (Enrollment $e) => $this->formatEnrollment($e, true))
+            ->values()
+            ->all();
+    }
+
+    /**
      * @return list<string>
      */
     public function enrollmentExportHeaders(): array
@@ -4984,14 +5003,21 @@ class LmsCatalogService
     {
         $e->loadMissing(['program', 'course', 'learningMode']);
 
+        $formData = is_array($e->form_data) ? $e->form_data : [];
+        $formLabels = is_array($formData['labels'] ?? null) ? $formData['labels'] : [];
+        $learningModeId = $e->learningMode?->public_id ?: ($formData['learningModeId'] ?? null);
+        $learningModeName = $e->learningMode?->name
+            ?: ($e->learningMode?->label ?? '')
+            ?: (string) ($formLabels['learningMode'] ?? '');
+
         $row = [
             'id' => $e->public_id,
             'programId' => $e->program?->public_id ?? '',
             'programTitle' => $e->program?->title ?? '',
             'courseId' => $e->course?->public_id,
             'courseTitle' => $e->course?->title ?? '',
-            'learningModeId' => $e->learningMode?->public_id,
-            'learningModeName' => $e->learningMode?->name ?: ($e->learningMode?->label ?? ''),
+            'learningModeId' => $learningModeId,
+            'learningModeName' => $learningModeName,
             'submittedAt' => optional($e->submitted_at)->format('Y-m-d'),
             'status' => $e->status,
             'requestKind' => is_array($e->form_data) && ($e->form_data['requestKind'] ?? '') === 'course_access'

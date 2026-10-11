@@ -23,6 +23,7 @@ use App\Support\ExcelDownload;
 use App\Support\ExportDateRange;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -102,6 +103,87 @@ class LmsEnrollmentController extends Controller
         }
 
         return response()->json(['data' => $catalog->enrolledCoursesForUser($user)]);
+    }
+
+    public function courseIndex(string $coursePublicId, LmsCatalogService $catalog): JsonResponse
+    {
+        $actor = $this->lmsActor();
+        if ($actor->id <= 0) {
+            abort(401, 'Authentication required.');
+        }
+        if (! $this->canManageEnrollments($actor)) {
+            abort(403, 'You cannot view course enrollments.');
+        }
+
+        $course = Course::query()->where('public_id', $coursePublicId)->firstOrFail();
+
+        return response()->json([
+            'data' => $catalog->courseEnrollmentsForStaff($course),
+        ]);
+    }
+
+    public function destroy(string $publicId): JsonResponse
+    {
+        $actor = $this->lmsActor();
+        if ($actor->id <= 0) {
+            abort(401, 'Authentication required.');
+        }
+        if (! $this->canManageEnrollments($actor)) {
+            abort(403, 'You cannot delete enrollments.');
+        }
+
+        $enrollment = Enrollment::query()->where('public_id', $publicId)->firstOrFail();
+        if ($enrollment->course_id === null) {
+            abort(422, 'Program enrollments cannot be deleted from a course roster.');
+        }
+
+        $this->deleteCourseEnrollmentRow($enrollment);
+
+        return response()->json([
+            'enrollmentId' => $publicId,
+            'deleted' => true,
+        ]);
+    }
+
+    public function destroyMany(Request $request): JsonResponse
+    {
+        $actor = $this->lmsActor();
+        if ($actor->id <= 0) {
+            abort(401, 'Authentication required.');
+        }
+        if (! $this->canManageEnrollments($actor)) {
+            abort(403, 'You cannot delete enrollments.');
+        }
+
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:200'],
+            'ids.*' => ['required', 'string', 'max:64'],
+        ]);
+
+        $rows = Enrollment::query()
+            ->whereIn('public_id', $data['ids'])
+            ->whereNotNull('course_id')
+            ->get();
+
+        $deleted = 0;
+        DB::transaction(function () use ($rows, &$deleted) {
+            foreach ($rows as $row) {
+                $this->deleteCourseEnrollmentRow($row);
+                $deleted++;
+            }
+        });
+
+        return response()->json([
+            'deletedCount' => $deleted,
+        ]);
+    }
+
+    protected function deleteCourseEnrollmentRow(Enrollment $enrollment): void
+    {
+        $userId = (int) $enrollment->user_id;
+        $this->deleteEnrollmentDocuments($enrollment);
+        $enrollment->delete();
+        LmsCatalogService::bustUserAnalyticsCache($userId);
     }
 
     public function export(Request $request, LmsCatalogService $catalog)
@@ -946,6 +1028,138 @@ class LmsEnrollmentController extends Controller
             'enrollmentId' => $enrollment->public_id,
             'status' => $enrollment->status,
         ]);
+    }
+
+    /**
+     * Staff may switch Pure online, Face to face, or Blended for a learner's program cluster.
+     */
+    public function updateLearningMode(Request $request, string $publicId): JsonResponse
+    {
+        EnrollmentSchemaService::ensureFormDataColumns();
+        EnrollmentSchemaService::ensureLearningModeIdColumn();
+
+        $data = $request->validate([
+            'learningMode' => ['required', 'string', 'in:online,blended,face-to-face'],
+        ]);
+
+        $actor = $this->lmsActor();
+        if ($actor->id <= 0) {
+            abort(401, 'Authentication required.');
+        }
+
+        if (! $this->canManageEnrollments($actor)) {
+            abort(403, 'You cannot switch the mode of learning.');
+        }
+
+        $enrollment = Enrollment::query()
+            ->with('learningMode')
+            ->where('public_id', $publicId)
+            ->firstOrFail();
+
+        $currentFamily = $this->enrollmentLearningModeFamily($enrollment);
+        $targetFamily = (string) $data['learningMode'];
+        if ($currentFamily === $targetFamily) {
+            abort(422, 'This enrollment is already set to that mode of learning.');
+        }
+
+        $target = $this->firstLearningModeForFamily($targetFamily);
+        $updatedCount = 0;
+
+        DB::transaction(function () use ($enrollment, $target, &$updatedCount) {
+            $query = Enrollment::query()
+                ->where('user_id', $enrollment->user_id);
+
+            if ($enrollment->program_id) {
+                $query->where('program_id', $enrollment->program_id);
+            } else {
+                $query->whereKey($enrollment->id);
+            }
+
+            foreach ($query->get() as $row) {
+                $formData = is_array($row->form_data) ? $row->form_data : [];
+                $formData['learningModeId'] = $target->public_id;
+                $labels = is_array($formData['labels'] ?? null) ? $formData['labels'] : [];
+                $labels['learningMode'] = (string) ($target->name ?? '');
+                $formData['labels'] = $labels;
+
+                $row->update([
+                    'learning_mode_id' => $target->id,
+                    'form_data' => $formData,
+                ]);
+                $updatedCount++;
+            }
+        });
+
+        LmsCatalogService::bustUserAnalyticsCache($enrollment->user_id);
+
+        return response()->json([
+            'enrollmentId' => $enrollment->public_id,
+            'learningModeId' => $target->public_id,
+            'learningModeName' => $target->name,
+            'updatedCount' => $updatedCount,
+        ]);
+    }
+
+    protected function enrollmentLearningModeFamily(Enrollment $enrollment): ?string
+    {
+        $formData = is_array($enrollment->form_data) ? $enrollment->form_data : [];
+        $labels = is_array($formData['labels'] ?? null) ? $formData['labels'] : [];
+        $id = (string) ($enrollment->learningMode?->public_id ?: ($formData['learningModeId'] ?? ''));
+        $name = (string) ($enrollment->learningMode?->name ?: ($labels['learningMode'] ?? ''));
+
+        if (LearningMode::looksLikeBlendedClass($id, $name)) {
+            return 'blended';
+        }
+        if (LearningMode::looksLikeFaceToFaceClass($id, $name)) {
+            return 'face-to-face';
+        }
+        if (LearningMode::looksLikeOnlineClass($id, $name)) {
+            return 'online';
+        }
+
+        return null;
+    }
+
+    protected function learningModeMatchesFamily(LearningMode $mode, string $family): bool
+    {
+        return match ($family) {
+            'blended' => $mode->isBlendedClass(),
+            'face-to-face' => $mode->isFaceToFaceClass(),
+            'online' => $mode->isOnlineClass(),
+            default => false,
+        };
+    }
+
+    protected function firstLearningModeForFamily(string $family): LearningMode
+    {
+        $modes = LearningMode::query()
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        $match = $modes->first(function (LearningMode $mode) use ($family) {
+            if (($mode->status ?? '') !== 'active') {
+                return false;
+            }
+
+            return $this->learningModeMatchesFamily($mode, $family);
+        });
+
+        if ($match === null) {
+            $match = $modes->first(
+                fn (LearningMode $mode) => $this->learningModeMatchesFamily($mode, $family)
+            );
+        }
+
+        if ($match === null) {
+            abort(422, match ($family) {
+                'blended' => 'No blended learning mode is configured.',
+                'face-to-face' => 'No face to face learning mode is configured.',
+                default => 'No pure online learning mode is configured.',
+            });
+        }
+
+        return $match;
     }
 
     protected function notifyManagersOfEnrollment(Enrollment $enrollment): void

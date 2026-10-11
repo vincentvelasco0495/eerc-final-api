@@ -179,6 +179,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/students/linkable-users', [LmsStudentController::class, 'linkableUsers']);
         Route::get('/students', [LmsStudentController::class, 'index']);
         Route::post('/students', [LmsStudentController::class, 'store']);
+        Route::post('/students/{userPublicUid}/reset-password', [LmsStudentController::class, 'resetPassword']);
         Route::patch('/students/{userPublicUid}', [LmsStudentController::class, 'update']);
         Route::delete('/students/{userPublicUid}', [LmsStudentController::class, 'destroy']);
     });
@@ -217,6 +218,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/quizzes/{publicId}', [LmsQuizController::class, 'destroy']);
     Route::patch('/assignments/{publicId}', [LmsAssignmentController::class, 'update']);
     Route::delete('/assignments/{publicId}', [LmsAssignmentController::class, 'destroy']);
+    Route::get('/courses/{coursePublicId}/enrollments', [LmsEnrollmentController::class, 'courseIndex']);
     Route::get('/courses/{coursePublicId}/lesson-progress', [LmsLessonProgressController::class, 'index']);
     Route::post('/courses/{coursePublicId}/lesson-progress', [LmsLessonProgressController::class, 'complete']);
     Route::patch('/courses/{coursePublicId}/lesson-progress', [LmsLessonProgressController::class, 'heartbeat']);
@@ -248,11 +250,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('/enrollments', [LmsEnrollmentController::class, 'store']);
     Route::post('/enrollments/course-access-requests', [LmsEnrollmentController::class, 'storeCourseAccessRequest']);
+    Route::post('/enrollments/batch-delete', [LmsEnrollmentController::class, 'destroyMany']);
+    Route::delete('/enrollments/{publicId}', [LmsEnrollmentController::class, 'destroy']);
     Route::get('/enrollments/{publicId}', [LmsEnrollmentController::class, 'show']);
     Route::get('/enrollments/{publicId}/payment-proof', [LmsEnrollmentController::class, 'downloadPaymentProof']);
     Route::post('/enrollments/{publicId}/partial-payments', [LmsEnrollmentController::class, 'storePartialPayment']);
     Route::patch('/enrollments/{publicId}/payments/{paymentId}/verification', [LmsEnrollmentController::class, 'verifyPayment']);
     Route::get('/enrollments/{publicId}/documents/{documentKey}', [LmsEnrollmentController::class, 'downloadDocument']);
+    Route::patch('/enrollments/{publicId}/learning-mode', [LmsEnrollmentController::class, 'updateLearningMode']);
     Route::patch('/enrollments/{publicId}', [LmsEnrollmentController::class, 'updateStatus']);
 
     Route::get('/quizzes/{publicId}/questions', [LmsQuizController::class, 'questions']);
