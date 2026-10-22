@@ -1667,7 +1667,12 @@ class LmsCatalogService
             'Retaker attempts',
             'Downpayment',
             'Package',
+            'Terms confirmation',
+            'Profile picture',
+            'Discount proof',
+            'Retaker proof',
             'Payment proof',
+            'Signature',
             'Total paid',
             'Unreviewed payments',
         ];
@@ -1676,9 +1681,18 @@ class LmsCatalogService
     /**
      * @return list<list<string>>
      */
-    public function enrollmentsForExport(?string $search = null, ?string $from = null, ?string $to = null): array
+    public function enrollmentsForExport(?string $search = null, ?string $from = null, ?string $to = null, ?string $programPublicId = null): array
     {
         $query = $this->enrollmentsIndexQuery($search);
+        $programHint = $programPublicId !== null ? trim($programPublicId) : '';
+        if ($programHint !== '') {
+            $program = Program::query()->where('public_id', $programHint)->first();
+            if ($program === null) {
+                $query->whereRaw('0 = 1');
+            } else {
+                $query->where('program_id', $program->id);
+            }
+        }
         ExportDateRange::constrainCoalesce($query, $from, $to);
 
         $enrollments = $query->get();
@@ -1793,7 +1807,7 @@ class LmsCatalogService
 
     /**
      * @param  \Illuminate\Support\Collection<int, \Illuminate\Support\Collection<int, Course>>  $coursesByProgramId
-     * @return list<string>
+     * @return list<scalar|array<string, mixed>>
      */
     protected function formatEnrollmentExportRow(Enrollment $e, $coursesByProgramId = null): array
     {
@@ -1801,6 +1815,7 @@ class LmsCatalogService
 
         $student = $e->user?->studentProfile;
         $formData = is_array($e->form_data) ? $e->form_data : [];
+        $documents = $e->resolvedDocuments();
         $summary = \App\Support\EnrollmentPayments::summarizeFormDataPayments($formData);
         $labels = is_array($formData['labels'] ?? null) ? $formData['labels'] : [];
         $isCourseAccess = $e->course_id !== null
@@ -1854,9 +1869,47 @@ class LmsCatalogService
             (string) ($formData['retakerAttempts'] ?? ''),
             (string) ($formData['downpaymentAmount'] ?? ''),
             (string) ($labels['packageEnroll'] ?? $formData['packageEnrollId'] ?? ''),
-            $e->payment_proof_path ? 'Yes' : 'No',
+            ! empty($formData['confirmTerms']) ? 'Yes' : 'No',
+            $this->enrollmentExportDocumentCell($documents, 'profilePicture'),
+            $this->enrollmentExportDocumentCell($documents, 'discountProof'),
+            $this->enrollmentExportDocumentCell($documents, 'retakerProof'),
+            $this->enrollmentExportDocumentCell(
+                $documents,
+                'paymentProof',
+                $e->resolvedPaymentProof()
+            ),
+            $this->enrollmentExportDocumentCell($documents, 'signature'),
             $summary['verifiedTotal'] > 0 ? (string) $summary['verifiedTotal'] : '',
             ! empty($summary['hasUnreviewed']) ? 'Yes' : 'No',
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $documents
+     * @param  array<string, mixed>|null  $fallback
+     * @return array{v: string, image?: array<string, mixed>}|string
+     */
+    protected function enrollmentExportDocumentCell(array $documents, string $key, ?array $fallback = null): array|string
+    {
+        $doc = $documents[$key] ?? null;
+        if (! is_array($doc) || empty($doc['path'])) {
+            $doc = is_array($fallback) && ! empty($fallback['path']) ? $fallback : null;
+        }
+        if (! is_array($doc) || empty($doc['path'])) {
+            return '';
+        }
+
+        $name = trim((string) ($doc['originalName'] ?? basename((string) $doc['path'])));
+        $absolute = Storage::disk('public')->path((string) $doc['path']);
+        $image = \App\Support\SimpleXlsx::prepareImage($absolute, $doc['mime'] ?? null);
+
+        if ($image === null) {
+            return $name;
+        }
+
+        return [
+            'v' => $name,
+            'image' => $image,
         ];
     }
 

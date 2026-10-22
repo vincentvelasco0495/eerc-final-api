@@ -104,4 +104,63 @@ class Enrollment extends Model
     {
         return $query->where('status', self::STATUS_APPROVED);
     }
+
+    public function parentProgramEnrollment(): ?self
+    {
+        if ($this->course_id === null || $this->program_id === null) {
+            return null;
+        }
+
+        return static::query()
+            ->where('user_id', $this->user_id)
+            ->where('program_id', $this->program_id)
+            ->whereNull('course_id')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function resolvedDocuments(): array
+    {
+        $documents = is_array($this->documents) ? $this->documents : [];
+        if ($documents !== []) {
+            return $documents;
+        }
+
+        $parent = $this->parentProgramEnrollment();
+
+        return is_array($parent?->documents) ? $parent->documents : [];
+    }
+
+    /**
+     * @return array{path?: string, originalName?: string|null, mime?: string|null}
+     */
+    public function resolvedPaymentProof(): array
+    {
+        if ($this->payment_proof_path) {
+            return [
+                'path' => $this->payment_proof_path,
+                'originalName' => $this->payment_proof_original_name,
+                'mime' => $this->payment_proof_mime,
+            ];
+        }
+
+        $fromDocuments = $this->resolvedDocuments()['paymentProof'] ?? null;
+        if (is_array($fromDocuments) && ! empty($fromDocuments['path'])) {
+            return $fromDocuments;
+        }
+
+        $parent = $this->parentProgramEnrollment();
+        if ($parent?->payment_proof_path) {
+            return [
+                'path' => $parent->payment_proof_path,
+                'originalName' => $parent->payment_proof_original_name,
+                'mime' => $parent->payment_proof_mime,
+            ];
+        }
+
+        return [];
+    }
 }

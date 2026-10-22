@@ -199,12 +199,15 @@ class LmsEnrollmentController extends Controller
 
         $validated = $request->validate(array_merge(ExportDateRange::rules(), [
             'search' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'program' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'program_id' => ['sometimes', 'nullable', 'string', 'max:64'],
         ]));
         $search = isset($validated['search']) ? (string) $validated['search'] : null;
+        $programPublicId = trim((string) ($validated['program'] ?? $validated['program_id'] ?? ''));
         [$from, $to] = ExportDateRange::extract($validated);
 
         $headers = $catalog->enrollmentExportHeaders();
-        $rows = $catalog->enrollmentsForExport($search, $from, $to);
+        $rows = $catalog->enrollmentsForExport($search, $from, $to, $programPublicId !== '' ? $programPublicId : null);
 
         return ExcelDownload::make('Enrollments', $headers, $rows, 'enrollments');
     }
@@ -500,6 +503,30 @@ class LmsEnrollmentController extends Controller
         }
     }
 
+    protected function parentProgramEnrollment(Enrollment $enrollment): ?Enrollment
+    {
+        return $enrollment->parentProgramEnrollment();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function documentsForEnrollment(Enrollment $enrollment): array
+    {
+        return $enrollment->resolvedDocuments();
+    }
+
+    protected function paymentProofSource(Enrollment $enrollment): Enrollment
+    {
+        if ($enrollment->payment_proof_path) {
+            return $enrollment;
+        }
+
+        $parent = $enrollment->parentProgramEnrollment();
+
+        return $parent && $parent->payment_proof_path ? $parent : $enrollment;
+    }
+
     protected function storeCourseEnrollment(User $user, string $coursePublicId, $uploaded): JsonResponse
     {
         $course = Course::query()->where('public_id', $coursePublicId)->with('program')->firstOrFail();
@@ -675,7 +702,8 @@ class LmsEnrollmentController extends Controller
         }
 
         $student = $enrollment->user?->studentProfile;
-        $documents = is_array($enrollment->documents) ? $enrollment->documents : [];
+        $documents = $this->documentsForEnrollment($enrollment);
+        $proofSource = $this->paymentProofSource($enrollment);
         $documentSummaries = [];
 
         foreach ($documents as $key => $doc) {
@@ -708,9 +736,9 @@ class LmsEnrollmentController extends Controller
             'hasFormData' => is_array($formData) && $formData !== [],
             'formData' => is_array($formData) ? $formData : null,
             'documents' => $documentSummaries,
-            'hasPaymentProof' => (bool) $enrollment->payment_proof_path,
-            'paymentProofFileName' => $enrollment->payment_proof_original_name ?? null,
-            'paymentProofUrl' => $enrollment->payment_proof_path
+            'hasPaymentProof' => (bool) $proofSource->payment_proof_path,
+            'paymentProofFileName' => $proofSource->payment_proof_original_name ?? null,
+            'paymentProofUrl' => $proofSource->payment_proof_path
                 ? '/api/enrollments/'.$enrollment->public_id.'/payment-proof'
                 : null,
         ]);
@@ -922,7 +950,7 @@ class LmsEnrollmentController extends Controller
             abort(403, 'You cannot view this document.');
         }
 
-        $documents = is_array($enrollment->documents) ? $enrollment->documents : [];
+        $documents = $this->documentsForEnrollment($enrollment);
         $doc = $documents[$documentKey] ?? null;
 
         if (! is_array($doc) || empty($doc['path'])) {
@@ -958,14 +986,15 @@ class LmsEnrollmentController extends Controller
             abort(403, 'You cannot view this payment proof.');
         }
 
-        $path = $enrollment->payment_proof_path;
+        $proofSource = $this->paymentProofSource($enrollment);
+        $path = $proofSource->payment_proof_path;
         if (! $path || ! Storage::disk('public')->exists($path)) {
             abort(404, 'Payment proof not found.');
         }
 
         $disk = Storage::disk('public');
-        $name = $enrollment->payment_proof_original_name ?: 'payment-proof';
-        $mime = $enrollment->payment_proof_mime;
+        $name = $proofSource->payment_proof_original_name ?: 'payment-proof';
+        $mime = $proofSource->payment_proof_mime;
 
         if ($mime) {
             return $disk->response($path, $name, ['Content-Type' => $mime]);
