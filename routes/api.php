@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\ContactPageContentController;
 use App\Http\Controllers\Api\Admin\CmsMediaUploadController;
 use App\Http\Controllers\Api\Admin\HomepageContentAdminController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\LmsAdminUserController;
 use App\Http\Controllers\Api\HomepageContentController;
 use App\Http\Controllers\Api\LmsAdminSummaryController;
 use App\Http\Controllers\Api\LmsAnalyticsController;
@@ -64,6 +65,8 @@ Route::middleware('throttle:12,1')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/signup', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::get('/register-admin/status', [AuthController::class, 'adminRegistrationStatus']);
+    Route::post('/register-admin', [AuthController::class, 'registerAdmin']);
 });
 
 // Public catalog reads (DB-backed) — no login required.
@@ -182,6 +185,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/students/{userPublicUid}/reset-password', [LmsStudentController::class, 'resetPassword']);
         Route::patch('/students/{userPublicUid}', [LmsStudentController::class, 'update']);
         Route::delete('/students/{userPublicUid}', [LmsStudentController::class, 'destroy']);
+    });
+
+    Route::middleware('page:/setting-admin')->group(function () {
+        Route::get('/admins', [LmsAdminUserController::class, 'index']);
+        Route::post('/admins', [LmsAdminUserController::class, 'store']);
+        Route::post('/admins/{userPublicUid}/reset-password', [LmsAdminUserController::class, 'resetPassword']);
+        Route::patch('/admins/{userPublicUid}', [LmsAdminUserController::class, 'update']);
+        Route::delete('/admins/{userPublicUid}', [LmsAdminUserController::class, 'destroy']);
     });
 
     Route::middleware('page:/setting-payment')->group(function () {

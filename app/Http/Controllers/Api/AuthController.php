@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\LmsUserProfile;
 use App\Models\Student;
 use App\Models\User;
+use App\Services\LmsAdminUserService;
 use App\Services\LmsCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -86,5 +87,40 @@ class AuthController extends Controller
         $request->user()->currentAccessToken()?->delete();
 
         return response()->json(['message' => 'Logged out.']);
+    }
+
+    public function adminRegistrationStatus(LmsAdminUserService $admins): JsonResponse
+    {
+        return response()->json(['open' => ! $admins->adminExists()]);
+    }
+
+    public function registerAdmin(Request $request, LmsAdminUserService $admins, LmsCatalogService $catalog): JsonResponse
+    {
+        if ($admins->adminExists()) {
+            return response()->json([
+                'message' => 'Admin registration is closed. Ask an existing administrator to create an account.',
+            ], 403);
+        }
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+            'password' => ['required', 'confirmed', Password::defaults()],
+        ]);
+
+        $user = $admins->create(
+            trim($data['name']),
+            strtolower(trim($data['email'])),
+            $data['password']
+        );
+
+        $user->load(['lmsProfile.program', 'badges', 'studentProfile', 'instructorProfile']);
+        $token = $user->createToken('spa')->plainTextToken;
+
+        return response()->json([
+            'user' => $catalog->userPayload($user),
+            'token' => $token,
+            'token_type' => 'Bearer',
+        ], 201);
     }
 }
