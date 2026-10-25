@@ -71,4 +71,9 @@ class Course extends Model
     {
         return $this->hasMany(Quiz::class, 'course_id');
     }
+
+    public function libraryTabs(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(CourseLibraryTab::class, 'course_id')->orderBy('sort_order')->orderBy('id');
+    }
 }

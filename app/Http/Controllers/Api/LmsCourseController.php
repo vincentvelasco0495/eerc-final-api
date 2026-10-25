@@ -9,6 +9,7 @@ use App\Models\Course;
 use App\Models\Program;
 use App\Models\UserModuleProgress;
 use App\Services\LmsCatalogService;
+use App\Services\LmsCourseLibraryService;
 use App\Services\LmsCurriculumDeleteService;
 use App\Support\HttpCache;
 use App\Support\LmsCache;
@@ -73,8 +74,11 @@ class LmsCourseController extends Controller
             ->where('progress_percent', '>=', 100)
             ->pluck('module_id');
 
+        $payload = $catalog->formatCourse($course, $user, $completedMods);
+        $payload['libraryTabs'] = app(LmsCourseLibraryService::class)->tabsPayload($course);
+
         return response()->json([
-            'data' => $catalog->formatCourse($course, $user, $completedMods),
+            'data' => $payload,
         ]);
     }
 

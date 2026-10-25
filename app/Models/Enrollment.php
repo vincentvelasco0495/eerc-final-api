@@ -28,6 +28,7 @@ class Enrollment extends Model
         'package_enroll_id',
         'course_id',
         'status',
+        'amount_due',
         'rejection_reason',
         'submitted_at',
         'payment_proof_path',
@@ -41,6 +42,7 @@ class Enrollment extends Model
     {
         return [
             'submitted_at' => 'date',
+            'amount_due' => 'decimal:2',
             'form_data' => 'array',
             'documents' => 'array',
         ];
@@ -162,5 +164,25 @@ class Enrollment extends Model
         }
 
         return [];
+    }
+
+    /**
+     * Total this learner must pay for the program. The amount is stored on the
+     * program application, not on course enrollments, and overrides the catalog fee.
+     */
+    public function payableTotal(): ?float
+    {
+        $programEnrollment = $this->course_id === null ? $this : $this->parentProgramEnrollment();
+        $amount = $programEnrollment?->amount_due;
+        if ($amount !== null && $amount !== '') {
+            return round((float) $amount, 2);
+        }
+
+        $fee = ($programEnrollment ?? $this)->program?->enrollment_fee ?? $this->program?->enrollment_fee;
+        if (is_numeric($fee)) {
+            return round((float) $fee, 2);
+        }
+
+        return null;
     }
 }

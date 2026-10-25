@@ -29,6 +29,8 @@ class EnrollmentSchemaService
 
     private const PACKAGE_ENROLL_ID_MIGRATION = '2026_09_30_070000_add_package_enroll_id_to_enrollments_table';
 
+    private const AMOUNT_DUE_MIGRATION = '2026_10_25_150000_add_amount_due_to_enrollments_table';
+
     /**
      * Ensures enrollment wizard columns exist (self-heals when migrate was not run).
      */
@@ -436,6 +438,23 @@ class EnrollmentSchemaService
         });
 
         self::recordMigrationIfMissing(self::REJECTION_REASON_MIGRATION);
+    }
+
+    public static function ensureAmountDueColumn(): void
+    {
+        if (! Schema::hasTable('enrollments')) {
+            return;
+        }
+
+        if (Schema::hasColumn('enrollments', 'amount_due')) {
+            return;
+        }
+
+        Schema::table('enrollments', function (Blueprint $table) {
+            $table->decimal('amount_due', 12, 2)->nullable()->after('status');
+        });
+
+        self::recordMigrationIfMissing(self::AMOUNT_DUE_MIGRATION);
     }
 
     private static function recordMigrationIfMissing(string $migration): void

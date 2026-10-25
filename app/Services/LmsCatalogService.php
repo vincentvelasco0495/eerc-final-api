@@ -5073,6 +5073,9 @@ class LmsCatalogService
             'learningModeName' => $learningModeName,
             'submittedAt' => optional($e->submitted_at)->format('Y-m-d'),
             'status' => $e->status,
+            'amountDue' => $e->course_id === null && $e->amount_due !== null && $e->amount_due !== ''
+                ? round((float) $e->amount_due, 2)
+                : null,
             'requestKind' => is_array($e->form_data) && ($e->form_data['requestKind'] ?? '') === 'course_access'
                 ? 'course_access'
                 : ($e->course_id ? 'course' : 'program'),

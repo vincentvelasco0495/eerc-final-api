@@ -49,6 +49,7 @@ use App\Http\Controllers\Api\V1\LmsLessonVideoUploadController;
 use App\Http\Controllers\Api\V1\LmsQuizController;
 use App\Http\Controllers\Api\V1\LmsAssignmentController;
 use App\Http\Controllers\Api\V1\LmsLessonProgressController;
+use App\Http\Controllers\Api\V1\LmsCourseLibraryController;
 use App\Support\HttpCache;
 use Illuminate\Support\Facades\Route;
 
@@ -269,6 +270,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/enrollments/{publicId}/payments/{paymentId}/verification', [LmsEnrollmentController::class, 'verifyPayment']);
     Route::get('/enrollments/{publicId}/documents/{documentKey}', [LmsEnrollmentController::class, 'downloadDocument']);
     Route::patch('/enrollments/{publicId}/learning-mode', [LmsEnrollmentController::class, 'updateLearningMode']);
+    Route::patch('/enrollments/{publicId}/amount-due', [LmsEnrollmentController::class, 'updateAmountDue']);
     Route::patch('/enrollments/{publicId}', [LmsEnrollmentController::class, 'updateStatus']);
 
     Route::get('/quizzes/{publicId}/questions', [LmsQuizController::class, 'questions']);
@@ -279,6 +281,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/modules/{publicId}/visibility', [LmsModuleController::class, 'toggleVisibility']);
     Route::delete('/modules/{publicId}', [LmsModuleController::class, 'destroy']);
     Route::patch('/modules/{publicId}', [LmsModuleController::class, 'update']);
+
+    Route::get('/courses/{coursePublicId}/library-tabs', [LmsCourseLibraryController::class, 'index']);
+    Route::post('/courses/{coursePublicId}/library-tabs', [LmsCourseLibraryController::class, 'storeTab']);
+    Route::patch('/library-tabs/{publicId}', [LmsCourseLibraryController::class, 'updateTab']);
+    Route::delete('/library-tabs/{publicId}', [LmsCourseLibraryController::class, 'destroyTab']);
+    Route::post('/library-tabs/{publicId}/folders', [LmsCourseLibraryController::class, 'storeFolder']);
+    Route::patch('/library-folders/{publicId}', [LmsCourseLibraryController::class, 'updateFolder']);
+    Route::delete('/library-folders/{publicId}', [LmsCourseLibraryController::class, 'destroyFolder']);
+    Route::post('/library-folders/{publicId}/files', [LmsCourseLibraryController::class, 'storeFile']);
+    Route::delete('/library-files/{publicId}', [LmsCourseLibraryController::class, 'destroyFile']);
+    Route::get('/library-files/{publicId}/file', [LmsCourseLibraryController::class, 'download']);
 
     Route::post('/modules/{modulePublicId}/lesson-materials', [LmsLessonMaterialController::class, 'storeForModule']);
     Route::post('/assignments/{assignmentPublicId}/lesson-materials', [LmsLessonMaterialController::class, 'storeForAssignment']);

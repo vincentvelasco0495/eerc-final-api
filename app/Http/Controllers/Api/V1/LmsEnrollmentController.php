@@ -41,6 +41,8 @@ class LmsEnrollmentController extends Controller
 
     public function index(Request $request, LmsCatalogService $catalog): JsonResponse
     {
+        EnrollmentSchemaService::ensureAmountDueColumn();
+
         $user = $this->lmsActor();
 
         if ($request->filled('page')) {
@@ -734,6 +736,9 @@ class LmsEnrollmentController extends Controller
             'schoolHeld' => $student?->school_held ?? '',
             'aliasName' => $student?->alias_name ?? '',
             'hasFormData' => is_array($formData) && $formData !== [],
+            'amountDue' => $enrollment->course_id === null && $enrollment->amount_due !== null && $enrollment->amount_due !== ''
+                ? round((float) $enrollment->amount_due, 2)
+                : null,
             'formData' => is_array($formData) ? $formData : null,
             'documents' => $documentSummaries,
             'hasPaymentProof' => (bool) $proofSource->payment_proof_path,
@@ -788,7 +793,7 @@ class LmsEnrollmentController extends Controller
             abort(422, 'Amount must be greater than zero.');
         }
 
-        $programFee = $enrollment->program?->enrollment_fee;
+        $programFee = $enrollment->payableTotal();
         if (is_numeric($programFee)) {
             $paymentSummary = EnrollmentPayments::summarizeFormDataPayments($formData);
             $paidSoFar = $paymentSummary['verifiedTotal'];
@@ -1056,6 +1061,63 @@ class LmsEnrollmentController extends Controller
         return response()->json([
             'enrollmentId' => $enrollment->public_id,
             'status' => $enrollment->status,
+        ]);
+    }
+
+    /**
+     * Staff sets the total a learner must pay for one program application.
+     * Course enrollments under that program do not get their own amount.
+     */
+    public function updateAmountDue(Request $request, string $publicId): JsonResponse
+    {
+        EnrollmentSchemaService::ensureAmountDueColumn();
+
+        $data = $request->validate([
+            'amount' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
+        ]);
+
+        $actor = $this->lmsActor();
+        if ($actor->id <= 0) {
+            abort(401, 'Authentication required.');
+        }
+
+        if (! $this->canManageEnrollments($actor)) {
+            abort(403, 'You cannot set the amount due.');
+        }
+
+        $enrollment = Enrollment::query()
+            ->with('program')
+            ->where('public_id', $publicId)
+            ->firstOrFail();
+
+        if ($enrollment->course_id !== null || ! $enrollment->program_id) {
+            abort(422, 'Set the amount on the program application, not on a course.');
+        }
+
+        $amount = array_key_exists('amount', $data) && $data['amount'] !== null
+            ? round((float) $data['amount'], 2)
+            : null;
+
+        $updatedCount = 0;
+
+        DB::transaction(function () use ($enrollment, $amount, &$updatedCount) {
+            Enrollment::query()
+                ->where('user_id', $enrollment->user_id)
+                ->where('program_id', $enrollment->program_id)
+                ->whereNotNull('course_id')
+                ->update(['amount_due' => null]);
+
+            $updatedCount = Enrollment::query()
+                ->where('user_id', $enrollment->user_id)
+                ->where('program_id', $enrollment->program_id)
+                ->whereNull('course_id')
+                ->update(['amount_due' => $amount]);
+        });
+
+        return response()->json([
+            'enrollmentId' => $enrollment->public_id,
+            'amountDue' => $amount,
+            'updatedCount' => $updatedCount,
         ]);
     }
 
