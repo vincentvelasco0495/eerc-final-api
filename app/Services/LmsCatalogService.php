@@ -3130,14 +3130,7 @@ class LmsCatalogService
         }
 
         $passingGrade = $this->assignmentPassingGrade($assignment);
-        $attemptUserIds = AssignmentAttempt::query()
-            ->where('assignment_id', $assignment->id)
-            ->pluck('user_id')
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
-        $enrolledUserIds = $this->leaderboardStudentIdsForCourse($course, $attemptUserIds);
+        $enrolledUserIds = $this->enrolledUserIdsForCourse($course);
         $aliasByUserId = $useAliasNames
             ? $this->aliasNamesByUserIdForCourse($course, $enrolledUserIds)
             : [];
