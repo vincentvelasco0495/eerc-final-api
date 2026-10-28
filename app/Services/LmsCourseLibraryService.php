@@ -6,7 +6,9 @@ use App\Models\Course;
 use App\Models\CourseLibraryFile;
 use App\Models\CourseLibraryFolder;
 use App\Models\CourseLibraryTab;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -15,11 +17,22 @@ class LmsCourseLibraryService
 {
     public const MAX_FILE_KB = 10240;
 
-    public const RESERVED_SLUGS = [
+    public const TAB_TYPES = [
         'quiz',
         'handouts',
         'lecture-video',
         'group-study',
+        'folder',
+    ];
+
+    public const DEFAULT_TABS = [
+        ['type' => 'quiz', 'title' => 'Quiz', 'slug' => 'quiz'],
+        ['type' => 'handouts', 'title' => 'Handouts', 'slug' => 'handouts'],
+        ['type' => 'lecture-video', 'title' => 'Lecture video', 'slug' => 'lecture-video'],
+        ['type' => 'group-study', 'title' => 'Group study', 'slug' => 'group-study'],
+    ];
+
+    public const RESERVED_SLUGS = [
         'curriculum',
         'notice',
         'faq',
@@ -34,7 +47,10 @@ class LmsCourseLibraryService
             return [];
         }
 
-        $course->loadMissing(['libraryTabs.folders.files']);
+        $this->ensureTabSchema();
+        $this->ensureDefaultTabs($course);
+        $course->unsetRelation('libraryTabs');
+        $course->load(['libraryTabs.folders.files']);
 
         return $course->libraryTabs->map(fn (CourseLibraryTab $tab) => $this->formatTab($tab))->values()->all();
     }
@@ -50,6 +66,7 @@ class LmsCourseLibraryService
             'id' => $tab->public_id,
             'key' => $tab->slug,
             'title' => $tab->title,
+            'type' => $this->normalizeTabType($tab->tab_type),
             'isDefault' => false,
             'sortOrder' => (int) $tab->sort_order,
             'folders' => $this->folderTree($tab->folders, null),
@@ -102,8 +119,9 @@ class LmsCourseLibraryService
         ];
     }
 
-    public function createTab(Course $course, string $title): CourseLibraryTab
+    public function createTab(Course $course, string $title, string $type = 'folder'): CourseLibraryTab
     {
+        $this->ensureTabSchema();
         $cleanTitle = trim($title);
         $slug = $this->uniqueSlug($course, $cleanTitle);
         $maxSort = (int) CourseLibraryTab::query()->where('course_id', $course->id)->max('sort_order');
@@ -113,8 +131,88 @@ class LmsCourseLibraryService
             'course_id' => $course->id,
             'title' => $cleanTitle,
             'slug' => $slug,
+            'tab_type' => $this->normalizeTabType($type),
             'sort_order' => $maxSort + 1,
         ]);
+    }
+
+    public function ensureTabSchema(): void
+    {
+        if (! Schema::hasTable('course_library_tabs')) {
+            return;
+        }
+
+        if (! Schema::hasColumn('course_library_tabs', 'tab_type')) {
+            Schema::table('course_library_tabs', function (Blueprint $table) {
+                $table->string('tab_type', 32)->default('folder')->after('slug');
+            });
+        }
+
+        if (Schema::hasTable('courses') && ! Schema::hasColumn('courses', 'library_tabs_seeded')) {
+            Schema::table('courses', function (Blueprint $table) {
+                $table->boolean('library_tabs_seeded')->default(false);
+            });
+        }
+    }
+
+    public function ensureDefaultTabs(Course $course): void
+    {
+        if (! Schema::hasColumn('courses', 'library_tabs_seeded') || $this->isSeeded($course->library_tabs_seeded)) {
+            return;
+        }
+
+        DB::transaction(function () use ($course) {
+            $locked = Course::query()->whereKey($course->id)->lockForUpdate()->first();
+            if ($locked === null || $this->isSeeded($locked->library_tabs_seeded)) {
+                return;
+            }
+
+            $existing = CourseLibraryTab::query()
+                ->where('course_id', $locked->id)
+                ->orderBy('sort_order')
+                ->orderBy('id')
+                ->get();
+
+            foreach ($existing as $index => $tab) {
+                $tab->sort_order = 10 + $index;
+                if (! is_string($tab->tab_type) || $tab->tab_type === '') {
+                    $tab->tab_type = 'folder';
+                }
+                $tab->save();
+            }
+
+            $takenTypes = $existing->pluck('tab_type')->filter()->all();
+            foreach (self::DEFAULT_TABS as $index => $definition) {
+                if (in_array($definition['type'], $takenTypes, true)) {
+                    continue;
+                }
+                CourseLibraryTab::query()->create([
+                    'public_id' => 'tab-'.Str::lower(Str::ulid()),
+                    'course_id' => $locked->id,
+                    'title' => $definition['title'],
+                    'slug' => $this->uniqueSlug($locked, $definition['slug']),
+                    'tab_type' => $definition['type'],
+                    'sort_order' => $index + 1,
+                ]);
+            }
+
+            $locked->library_tabs_seeded = true;
+            $locked->save();
+        });
+
+        $course->library_tabs_seeded = true;
+    }
+
+    private function isSeeded(mixed $value): bool
+    {
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+    }
+
+    public function normalizeTabType(mixed $type): string
+    {
+        $value = strtolower(trim((string) $type));
+
+        return in_array($value, self::TAB_TYPES, true) ? $value : 'folder';
     }
 
     public function uniqueSlug(Course $course, string $title, ?int $ignoreTabId = null): string

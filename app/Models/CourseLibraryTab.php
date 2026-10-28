@@ -13,6 +13,7 @@ class CourseLibraryTab extends Model
         'course_id',
         'title',
         'slug',
+        'tab_type',
         'sort_order',
     ];
 

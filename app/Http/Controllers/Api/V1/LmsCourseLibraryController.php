@@ -35,9 +35,10 @@ class LmsCourseLibraryController extends Controller
         $course = $this->findCourse($coursePublicId);
         $data = $request->validate([
             'title' => ['required', 'string', 'max:80'],
+            'type' => ['required', 'string', 'in:'.implode(',', LmsCourseLibraryService::TAB_TYPES)],
         ]);
 
-        $tab = $library->createTab($course, $data['title']);
+        $tab = $library->createTab($course, $data['title'], $data['type']);
 
         return response()->json(['data' => $library->formatTab($tab)], 201);
     }
@@ -45,12 +46,14 @@ class LmsCourseLibraryController extends Controller
     public function updateTab(Request $request, string $publicId, LmsCourseLibraryService $library): JsonResponse
     {
         $this->assertStaff();
-        $tab = CourseLibraryTab::query()->where('public_id', $publicId)->firstOrFail();
+        $tab = CourseLibraryTab::query()->with('course')->where('public_id', $publicId)->firstOrFail();
         $data = $request->validate([
             'title' => ['required', 'string', 'max:80'],
+            'type' => ['required', 'string', 'in:'.implode(',', LmsCourseLibraryService::TAB_TYPES)],
         ]);
 
         $tab->title = trim($data['title']);
+        $tab->tab_type = $library->normalizeTabType($data['type']);
         $tab->slug = $library->uniqueSlug($tab->course, $tab->title, $tab->id);
         $tab->save();
 
