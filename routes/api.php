@@ -236,6 +236,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/courses/{coursePublicId}/lesson-progress', [LmsLessonProgressController::class, 'heartbeat']);
     Route::get('/quiz-results/export', [LmsQuizResultController::class, 'export']);
     Route::get('/quiz-results', [LmsQuizResultController::class, 'index']);
+    Route::get('/assignment-results', [LmsMyAssignmentController::class, 'results']);
     Route::get('/assignment-summaries/export', [LmsAssignmentSummaryController::class, 'export']);
     Route::get('/assignment-summaries', [LmsAssignmentSummaryController::class, 'index']);
     Route::get('/quiz-summaries/export', [LmsQuizSummaryController::class, 'export']);
@@ -318,6 +319,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('page:/content-management')->group(function () {
         Route::get('/admin/homepage-v2', [HomepageContentAdminController::class, 'show']);
+        Route::put('/admin/homepage-v2/order', [HomepageContentAdminController::class, 'reorder']);
         Route::put('/admin/homepage-v2/{section}', [HomepageContentAdminController::class, 'update']);
         Route::post('/admin/homepage-v2/publish-all', [HomepageContentAdminController::class, 'publishAll']);
         Route::get('/admin/about-us', [AboutPageContentAdminController::class, 'show']);

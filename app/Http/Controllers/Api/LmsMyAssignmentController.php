@@ -47,4 +47,15 @@ class LmsMyAssignmentController extends Controller
             )
         );
     }
+
+    public function results(LmsCatalogService $catalog): JsonResponse
+    {
+        $user = $this->lmsActor();
+
+        if ($user->id <= 0) {
+            return response()->json(['data' => []]);
+        }
+
+        return response()->json(['data' => $catalog->assignmentResultsForUser($user)]);
+    }
 }

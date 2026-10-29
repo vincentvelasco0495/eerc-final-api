@@ -3329,8 +3329,10 @@ class LmsCatalogService
             ->get();
 
         $bestAttemptByAssignment = [];
+        $attemptCountByAssignment = [];
         foreach ($attemptRows as $attempt) {
             $aid = (int) $attempt->assignment_id;
+            $attemptCountByAssignment[$aid] = ($attemptCountByAssignment[$aid] ?? 0) + 1;
             if (! isset($bestAttemptByAssignment[$aid])) {
                 $bestAttemptByAssignment[$aid] = $attempt;
             }
@@ -3339,7 +3341,8 @@ class LmsCatalogService
         $rows = $assignments
             ->map(fn (Assignment $assignment) => $this->formatMyAssignmentRow(
                 $assignment,
-                $bestAttemptByAssignment[(int) $assignment->id] ?? null
+                $bestAttemptByAssignment[(int) $assignment->id] ?? null,
+                (int) ($attemptCountByAssignment[(int) $assignment->id] ?? 0)
             ))
             ->values()
             ->all();
@@ -3416,7 +3419,7 @@ class LmsCatalogService
     /**
      * @return array<string, mixed>
      */
-    protected function formatMyAssignmentRow(Assignment $assignment, ?AssignmentAttempt $attempt): array
+    protected function formatMyAssignmentRow(Assignment $assignment, ?AssignmentAttempt $attempt, int $attemptsUsed = 0): array
     {
         $course = $assignment->course;
         $passingGrade = $this->assignmentPassingGrade($assignment);
@@ -3451,6 +3454,36 @@ class LmsCatalogService
             'progressLabel' => $score !== null ? "{$score}%" : '—',
             'score' => $score,
             'passingGrade' => $passingGrade,
+            'attemptsUsed' => $attemptsUsed,
+            'attemptsAllowed' => (int) $assignment->attempts_allowed,
+        ];
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function assignmentResultsForUser(User $target): array
+    {
+        return AssignmentAttempt::query()
+            ->with('assignment')
+            ->where('user_id', $target->id)
+            ->orderByDesc('attempted_on')
+            ->orderByDesc('id')
+            ->get()
+            ->filter(fn (AssignmentAttempt $attempt) => $attempt->assignment !== null)
+            ->map(fn (AssignmentAttempt $attempt) => $this->formatAssignmentAttempt($attempt))
+            ->values()
+            ->all();
+    }
+
+    protected function formatAssignmentAttempt(AssignmentAttempt $attempt): array
+    {
+        return [
+            'id' => $attempt->public_id,
+            'assignmentId' => $attempt->assignment->public_id,
+            'date' => $attempt->attempted_on->format('Y-m-d'),
+            'score' => (int) $attempt->score,
+            'durationUsed' => $attempt->duration_used_label,
+            'correctAnswers' => (int) $attempt->correct_answers,
+            'totalQuestions' => (int) $attempt->total_questions,
         ];
     }
 
@@ -3619,6 +3652,8 @@ class LmsCatalogService
         $score = $attemptsUsed > 0 ? $bestScore : null;
         $correct = $bestAttempt !== null ? (int) $bestAttempt->correct_answers : null;
         $totalQuestions = $bestAttempt !== null ? (int) $bestAttempt->total_questions : null;
+        $settings = is_array($quiz->settings_json) ? $quiz->settings_json : [];
+        $authoring = $this->normalizeQuizAuthoringFromRow($quiz, $settings);
 
         return [
             'id' => $quiz->public_id,
@@ -3628,6 +3663,7 @@ class LmsCatalogService
             'courseTitle' => $course?->title ?? '',
             'title' => $quiz->title,
             'attemptsUsed' => $attemptsUsed,
+            'attemptsAllowed' => (int) $quiz->attempts_allowed,
             'attemptsLabel' => "{$attemptsUsed} attempt(s)",
             'questionCount' => $questionCount,
             'questionsLabel' => "{$questionCount} questions",
@@ -3637,6 +3673,8 @@ class LmsCatalogService
             'progressLabel' => $score !== null ? "{$score}%" : '—',
             'bestScore' => $score,
             'passingGrade' => $passingGrade,
+            'retakeAfterPass' => (bool) ($authoring['retakeAfterPass'] ?? false),
+            'limitedRetakeAttempts' => (bool) ($authoring['limitedRetakeAttempts'] ?? false),
         ];
     }
 

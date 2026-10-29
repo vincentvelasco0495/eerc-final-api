@@ -11,6 +11,8 @@ return [
         'status' => 'published',
         'content_json' => [
             'visible' => true,
+            'imageOnly' => false,
+            'banner' => ['label' => 'Banner image', 'alt' => 'Homepage banner', 'url' => null, 'mediaId' => null],
             'label' => 'Professional learning platform',
             'headline' => 'High quality learning at your own pace',
             'description' => 'Build confidence with guided modules, secure lesson delivery, practice quizzes, and progress analytics — all in one polished workspace designed for serious learners.',

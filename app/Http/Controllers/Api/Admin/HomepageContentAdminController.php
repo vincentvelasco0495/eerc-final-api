@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\HomepageContentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class HomepageContentAdminController extends Controller
 {
@@ -35,5 +36,15 @@ class HomepageContentAdminController extends Controller
         $service->publishAll();
 
         return response()->json($service->adminPayload());
+    }
+
+    public function reorder(Request $request, HomepageContentService $service): JsonResponse
+    {
+        $validated = $request->validate([
+            'sectionKeys' => ['required', 'array', 'size:'.count(HomepageContentService::SECTION_KEYS)],
+            'sectionKeys.*' => ['required', 'string', 'distinct', Rule::in(HomepageContentService::SECTION_KEYS)],
+        ]);
+
+        return response()->json($service->reorder($validated['sectionKeys']));
     }
 }

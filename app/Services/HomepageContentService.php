@@ -106,6 +106,34 @@ class HomepageContentService
     }
 
     /**
+     * @param  list<string>  $sectionKeys
+     * @return array{sections: array<string, array<string, mixed>>, meta: array<string, mixed>}
+     */
+    public function reorder(array $sectionKeys): array
+    {
+        $keys = array_values(array_map(
+            static fn ($key) => strtolower(trim((string) $key)),
+            $sectionKeys
+        ));
+
+        $unknown = array_diff($keys, self::SECTION_KEYS);
+        $missing = array_diff(self::SECTION_KEYS, $keys);
+        if ($unknown !== [] || $missing !== [] || count($keys) !== count(self::SECTION_KEYS)) {
+            abort(422, 'Section order must include every homepage section once.');
+        }
+
+        foreach ($keys as $index => $key) {
+            HomepageSection::query()
+                ->where('section_key', $key)
+                ->update(['sort_order' => ($index + 1) * 10]);
+        }
+
+        LmsCache::bustCms();
+
+        return $this->adminPayload();
+    }
+
+    /**
      * @param  Collection<int, HomepageSection>  $rows
      * @return array<string, array<string, mixed>>
      */
