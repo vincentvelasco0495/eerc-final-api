@@ -6,7 +6,7 @@ return [
     'allowed_methods' => ['*'],
 
     'allowed_origins' => [
-        'https://eerc-final.netlify.app',
+        'https://eerclearningcenter.com',
         'http://localhost:3030',
         'http://127.0.0.1:3030',
     ],
