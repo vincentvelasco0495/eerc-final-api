@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Models\LmsUserProfile;
+use App\Models\Student;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class LmsAdminUserService
@@ -31,6 +33,32 @@ class LmsAdminUserService
         ]);
 
         return $user->fresh();
+    }
+
+    /**
+     * Remove an admin from the admin list and free the email so it can be registered again.
+     * A linked student roster row is soft-deleted so the retired address does not stay on that list.
+     */
+    public function archiveRetiredAdminLogin(User $user): bool
+    {
+        if (strtolower((string) $user->role) !== 'admin') {
+            return false;
+        }
+
+        DB::transaction(function () use ($user) {
+            $student = Student::query()->where('user_id', $user->id)->first();
+            if ($student) {
+                $student->delete();
+            }
+
+            $user->tokens()->delete();
+            $user->email = sprintf('deleted.%d.%s@users.invalid', $user->id, Str::lower((string) Str::ulid()));
+            $user->status = 'inactive';
+            $user->role = 'retired';
+            $user->save();
+        });
+
+        return true;
     }
 
     /**

@@ -132,6 +132,32 @@ class LmsStudentService
         return $this->formatStudent($student->fresh()->load('user'));
     }
 
+    /**
+     * Free a student login email after the roster row is soft-deleted so the address can be registered again.
+     * Admin and instructor accounts are left unchanged, and an active roster row is never archived.
+     */
+    public function archiveRetiredStudentLogin(User $user): bool
+    {
+        if (strtolower((string) $user->role) !== 'student') {
+            return false;
+        }
+
+        if (Student::query()->where('user_id', $user->id)->exists()) {
+            return false;
+        }
+
+        if (! Student::onlyTrashed()->where('user_id', $user->id)->exists()) {
+            return false;
+        }
+
+        $user->tokens()->delete();
+        $user->email = sprintf('deleted.%d.%s@users.invalid', $user->id, Str::lower((string) Str::ulid()));
+        $user->status = 'inactive';
+        $user->save();
+
+        return true;
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function students(): array
     {

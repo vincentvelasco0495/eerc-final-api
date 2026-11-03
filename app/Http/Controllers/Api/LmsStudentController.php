@@ -11,6 +11,7 @@ use App\Support\ExportDateRange;
 use App\Support\StudentProfileValidation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -93,11 +94,23 @@ class LmsStudentController extends Controller
         $user = User::query()->whereRaw('LOWER(email) = ?', [$email])->first();
 
         if ($user) {
-            if (Student::withTrashed()->where('user_id', $user->id)->exists()) {
+            if (Student::query()->where('user_id', $user->id)->exists()) {
                 return response()->json([
                     'message' => 'A student roster entry already exists for this email.',
                 ], 422);
             }
+
+            if (Student::onlyTrashed()->where('user_id', $user->id)->exists()) {
+                if (! $service->archiveRetiredStudentLogin($user)) {
+                    return response()->json([
+                        'message' => 'A student roster entry already exists for this email.',
+                    ], 422);
+                }
+                $user = null;
+            }
+        }
+
+        if ($user) {
             $user->name = trim((string) $validated['name']);
             $user->save();
         } else {
@@ -228,15 +241,21 @@ class LmsStudentController extends Controller
         return response()->json(['message' => 'Password reset.']);
     }
 
-    public function destroy(string $userPublicUid): JsonResponse
+    public function destroy(string $userPublicUid, LmsStudentService $service): JsonResponse
     {
         $student = $this->findStudentByUserPublicUid($userPublicUid);
+        $user = $student->user;
 
         if (is_string($student->profile_path) && $student->profile_path !== '' && ! str_starts_with($student->profile_path, 'http')) {
             Storage::disk('public')->delete($student->profile_path);
         }
 
-        $student->delete();
+        DB::transaction(function () use ($student, $user, $service) {
+            $student->delete();
+            if ($user !== null) {
+                $service->archiveRetiredStudentLogin($user);
+            }
+        });
 
         return response()->json(['message' => 'Student roster entry deleted.']);
     }

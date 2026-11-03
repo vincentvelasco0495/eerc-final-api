@@ -8,6 +8,7 @@ use App\Models\Student;
 use App\Models\User;
 use App\Services\LmsAdminUserService;
 use App\Services\LmsCatalogService;
+use App\Services\LmsStudentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -17,18 +18,26 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    public function register(Request $request, LmsCatalogService $catalog): JsonResponse
+    public function register(Request $request, LmsCatalogService $catalog, LmsStudentService $students): JsonResponse
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+            'email' => ['required', 'string', 'email', 'max:255'],
             'password' => ['required', 'confirmed', Password::defaults()],
         ]);
+
+        $email = strtolower(trim($data['email']));
+        $existing = User::query()->whereRaw('LOWER(email) = ?', [$email])->first();
+        if ($existing && ! $students->archiveRetiredStudentLogin($existing)) {
+            throw ValidationException::withMessages([
+                'email' => ['The email has already been taken.'],
+            ]);
+        }
 
         $user = User::query()->create([
             'public_uid' => 'user-'.Str::lower(Str::ulid()),
             'name' => $data['name'],
-            'email' => $data['email'],
+            'email' => $email,
             'password' => $data['password'],
             'role' => 'student',
         ]);

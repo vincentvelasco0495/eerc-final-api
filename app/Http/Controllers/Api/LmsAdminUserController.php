@@ -101,7 +101,7 @@ class LmsAdminUserController extends Controller
         return response()->json(['message' => 'Password reset.']);
     }
 
-    public function destroy(Request $request, string $userPublicUid): JsonResponse
+    public function destroy(Request $request, string $userPublicUid, LmsAdminUserService $admins): JsonResponse
     {
         $user = $this->findAdmin($userPublicUid);
 
@@ -118,8 +118,7 @@ class LmsAdminUserController extends Controller
             return response()->json(['message' => 'At least one admin account must remain.'], 422);
         }
 
-        $user->tokens()->delete();
-        $user->delete();
+        $admins->archiveRetiredAdminLogin($user);
 
         return response()->json(['message' => 'Admin account deleted.']);
     }
