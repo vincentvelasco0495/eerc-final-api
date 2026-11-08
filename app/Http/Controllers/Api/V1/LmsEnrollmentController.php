@@ -135,11 +135,8 @@ class LmsEnrollmentController extends Controller
         }
 
         $enrollment = Enrollment::query()->where('public_id', $publicId)->firstOrFail();
-        if ($enrollment->course_id === null) {
-            abort(422, 'Program enrollments cannot be deleted from a course roster.');
-        }
 
-        $this->deleteCourseEnrollmentRow($enrollment);
+        $this->deleteEnrollmentRow($enrollment);
 
         return response()->json([
             'enrollmentId' => $publicId,
@@ -164,13 +161,12 @@ class LmsEnrollmentController extends Controller
 
         $rows = Enrollment::query()
             ->whereIn('public_id', $data['ids'])
-            ->whereNotNull('course_id')
             ->get();
 
         $deleted = 0;
         DB::transaction(function () use ($rows, &$deleted) {
             foreach ($rows as $row) {
-                $this->deleteCourseEnrollmentRow($row);
+                $this->deleteEnrollmentRow($row);
                 $deleted++;
             }
         });
@@ -180,7 +176,7 @@ class LmsEnrollmentController extends Controller
         ]);
     }
 
-    protected function deleteCourseEnrollmentRow(Enrollment $enrollment): void
+    protected function deleteEnrollmentRow(Enrollment $enrollment): void
     {
         $userId = (int) $enrollment->user_id;
         $this->deleteEnrollmentDocuments($enrollment);
