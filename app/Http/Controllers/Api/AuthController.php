@@ -9,9 +9,11 @@ use App\Models\User;
 use App\Services\LmsAdminUserService;
 use App\Services\LmsCatalogService;
 use App\Services\LmsStudentService;
+use App\Support\StudentProfileValidation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
@@ -20,11 +22,20 @@ class AuthController extends Controller
 {
     public function register(Request $request, LmsCatalogService $catalog, LmsStudentService $students): JsonResponse
     {
-        $data = $request->validate([
+        $request->merge([
+            'phoneNumber' => trim((string) $request->input('phoneNumber', '')),
+            'schoolHeld' => trim((string) $request->input('schoolHeld', '')),
+        ]);
+
+        $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255'],
             'password' => ['required', 'confirmed', Password::defaults()],
+            'phoneNumber' => ['required', 'string', 'max:32'],
+            'schoolHeld' => ['required', 'string', 'max:255'],
         ]);
+        StudentProfileValidation::applyToValidator($validator, false);
+        $data = $validator->validate();
 
         $email = strtolower(trim($data['email']));
         $existing = User::query()->whereRaw('LOWER(email) = ?', [$email])->first();
@@ -48,7 +59,11 @@ class AuthController extends Controller
             'joined_at' => now()->toDateString(),
         ]);
 
-        Student::query()->create(['user_id' => $user->id]);
+        Student::query()->create([
+            'user_id' => $user->id,
+            'phone_number' => $data['phoneNumber'],
+            'school_held' => $data['schoolHeld'],
+        ]);
 
         $user->refresh();
         $user->load(['lmsProfile.program', 'badges', 'studentProfile', 'instructorProfile']);
