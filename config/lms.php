@@ -7,6 +7,8 @@ return [
      */
     'actor_public_uid' => env('LMS_ACTOR_PUBLIC_UID', 'learner-01'),
 
+    'frontend_url' => rtrim((string) env('FRONTEND_URL', 'https://eerclearningcenter.com'), '/'),
+
     /*
     | Video lessons: chunked authoring uploads + concurrent HTML5 playback.
     | Set LMS_VIDEO_ACCEL_REDIRECT (nginx internal location prefix) so PHP

@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\Enrollment;
 use App\Models\InAppNotification;
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 class EnrollmentNotificationService
@@ -140,11 +142,41 @@ class EnrollmentNotificationService
             $body,
             (int) $enrollment->id
         );
+
+        if ($newStatus === 'approved') {
+            $this->emailApproval($enrollment->user, $title, $body);
+        }
     }
 
     public function shouldRemoveOnRead(?string $kind): bool
     {
         return in_array((string) $kind, self::REMOVE_ON_READ_KINDS, true);
+    }
+
+    private function emailApproval(?User $user, string $title, string $body): void
+    {
+        $email = trim((string) ($user?->email ?? ''));
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return;
+        }
+
+        if ((string) config('mail.default') !== 'smtp' || trim((string) config('mail.mailers.smtp.host')) === '') {
+            return;
+        }
+
+        $site = (string) config('lms.frontend_url', 'https://eerclearningcenter.com');
+        $messageBody = $body."\n\nSign in at {$site} to continue.";
+
+        try {
+            Mail::raw($messageBody, function ($message) use ($email, $title) {
+                $message->to($email)->subject($title);
+            });
+        } catch (\Throwable $exception) {
+            Log::warning('Enrollment approval email failed.', [
+                'email' => $email,
+                'error' => $exception->getMessage(),
+            ]);
+        }
     }
 
     private function createNotification(
