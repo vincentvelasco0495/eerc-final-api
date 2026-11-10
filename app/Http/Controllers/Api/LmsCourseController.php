@@ -129,6 +129,8 @@ class LmsCourseController extends Controller
             $n++;
         }
 
+        $nextSortOrder = ((int) Course::query()->where('program_id', $program->id)->max('sort_order')) + 1;
+
         $course = Course::query()->create([
             'public_id' => (string) Str::uuid(),
             'program_id' => $program->id,
@@ -138,6 +140,7 @@ class LmsCourseController extends Controller
             'description' => null,
             'marketing_json' => [],
             'is_published' => false,
+            'sort_order' => $nextSortOrder,
         ]);
 
         LmsCatalogService::bustUserAnalyticsCache($user->id);
@@ -152,6 +155,26 @@ class LmsCourseController extends Controller
         return response()->json([
             'data' => $catalog->formatCourse($fresh, $user, $completedMods),
         ], 201);
+    }
+
+    public function reorder(Request $request, string $programPublicId, LmsCatalogService $catalog): JsonResponse
+    {
+        $user = $this->lmsActor();
+        if (strtolower(trim((string) ($user->role ?? ''))) !== 'admin') {
+            abort(403, 'Only an admin can reorder courses.');
+        }
+
+        $program = Program::query()->where('public_id', $programPublicId)->firstOrFail();
+
+        $validated = $request->validate([
+            'courseIds' => ['required', 'array', 'min:1'],
+            'courseIds.*' => ['required', 'string', 'max:64'],
+        ]);
+
+        $catalog->reorderProgramCourses($program, $validated['courseIds']);
+        LmsCatalogService::bustUserAnalyticsCache($user->id);
+
+        return response()->json(['ok' => true]);
     }
 
     /** Partial update (`courses.description`, scalar fields, and merge into `courses.marketing_json`). */

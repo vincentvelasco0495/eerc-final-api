@@ -216,6 +216,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/modules/{modulePublicId}/standalone-lessons', [LmsModuleController::class, 'storeStandaloneLesson']);
     Route::patch('/standalone-lessons/{publicId}', [LmsModuleController::class, 'updateStandaloneLesson']);
     Route::delete('/standalone-lessons/{publicId}', [LmsModuleController::class, 'destroyStandaloneLesson']);
+    Route::patch('/programs/{programPublicId}/courses/reorder', [LmsCourseController::class, 'reorder']);
     Route::patch('/courses/{publicId}', [LmsCourseController::class, 'update']);
     Route::delete('/courses/{publicId}', [LmsCourseController::class, 'destroy']);
     Route::get('/enrollment-form/options', [LmsEnrollmentFormOptionsController::class, 'show']);

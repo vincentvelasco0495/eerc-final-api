@@ -28,6 +28,7 @@ class Course extends Model
         'video_hours_label',
         'preview_completed',
         'is_published',
+        'sort_order',
         'average_rating',
     ];
 

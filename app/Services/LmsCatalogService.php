@@ -37,6 +37,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -1509,7 +1510,7 @@ class LmsCatalogService
             ->when($status === 'published', fn ($query) => $query->where('is_published', true))
             ->when($status === 'draft', fn ($query) => $query->where('is_published', false))
             ->when($status === 'upcoming', fn ($query) => $query->whereRaw('0 = 1'))
-            ->orderByDesc('updated_at')
+            ->orderBy('sort_order')
             ->orderBy('title')
             ->paginate($perPage, ['*'], 'page', $page);
 
@@ -1527,6 +1528,48 @@ class LmsCatalogService
                 'lastPage' => $paginator->lastPage(),
             ],
         ];
+    }
+
+    /**
+     * Persist the admin's course order for one program.
+     * Ids missing from the request stay at the end, in their previous order.
+     *
+     * @param  array<int, string>  $publicIds
+     */
+    public function reorderProgramCourses(Program $program, array $publicIds): void
+    {
+        $requested = array_values(array_unique(array_filter(array_map(
+            static fn ($id) => trim((string) $id),
+            $publicIds
+        ))));
+
+        $rows = Course::query()
+            ->where('program_id', $program->id)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get(['id', 'public_id']);
+
+        $dbIdByPublic = $rows->pluck('id', 'public_id');
+        $ordered = [];
+
+        foreach ($requested as $publicId) {
+            $dbId = $dbIdByPublic->get($publicId);
+            if ($dbId !== null) {
+                $ordered[] = (int) $dbId;
+            }
+        }
+
+        foreach ($rows as $row) {
+            if (! in_array((int) $row->id, $ordered, true)) {
+                $ordered[] = (int) $row->id;
+            }
+        }
+
+        DB::transaction(function () use ($ordered) {
+            foreach ($ordered as $index => $courseId) {
+                DB::table('courses')->where('id', $courseId)->update(['sort_order' => $index + 1]);
+            }
+        });
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -4169,6 +4212,7 @@ class LmsCatalogService
             'updatedAt' => $c->updated_at?->toIso8601String(),
             'status' => $c->is_published ? 'published' : 'draft',
             'isPublished' => (bool) $c->is_published,
+            'sortOrder' => (int) ($c->sort_order ?? 0),
             'canAccessLessons' => $this->userCanAccessCourseLessons($user, $c),
             'lmsAccess' => $this->userLmsAccessLevel($user, $c),
             'deleted' => $c->trashed(),
@@ -4979,9 +5023,13 @@ class LmsCatalogService
 
     protected function formatQuizAttempt(QuizAttempt $a): array
     {
+        $quiz = $a->quiz;
+
         return [
             'id' => $a->public_id,
-            'quizId' => $a->quiz->public_id,
+            'quizId' => $quiz->public_id,
+            'quizTitle' => (string) $quiz->title,
+            'passingGrade' => $this->quizPassingGrade($quiz),
             'date' => $a->attempted_on->format('Y-m-d'),
             'score' => (int) $a->score,
             'durationUsed' => $a->duration_used_label,
@@ -5796,7 +5844,7 @@ class LmsCatalogService
 
         return array_map(static fn (array $row) => [
             (string) ($row['date'] ?? ''),
-            (string) ($row['quizId'] ?? ''),
+            (string) (($row['quizTitle'] ?? '') !== '' ? $row['quizTitle'] : ($row['quizId'] ?? '')),
             isset($row['score']) ? ((int) $row['score']).'%' : '',
             ($row['correctAnswers'] ?? '').'/'.($row['totalQuestions'] ?? ''),
             (string) ($row['durationUsed'] ?? ''),
