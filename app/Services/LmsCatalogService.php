@@ -2435,7 +2435,9 @@ class LmsCatalogService
         $query = QuizAttempt::query()
             ->with('quiz')
             ->where('user_id', $target->id)
-            ->orderByDesc('attempted_on');
+            ->orderByDesc('attempted_on')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
         ExportDateRange::constrain($query, $from, $to, 'attempted_on');
 
         return $query
@@ -5031,6 +5033,7 @@ class LmsCatalogService
             'quizTitle' => (string) $quiz->title,
             'passingGrade' => $this->quizPassingGrade($quiz),
             'date' => $a->attempted_on->format('Y-m-d'),
+            'createdAt' => $a->created_at?->toIso8601String(),
             'score' => (int) $a->score,
             'durationUsed' => $a->duration_used_label,
             'correctAnswers' => (int) $a->correct_answers,
