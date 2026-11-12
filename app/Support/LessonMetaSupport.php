@@ -58,7 +58,53 @@ class LessonMetaSupport
             $meta['watermarkOpacity'] = $opacity;
         }
 
+        if (
+            array_key_exists('videoSourceType', $meta)
+            || array_key_exists('videoExternalUrl', $meta)
+            || array_key_exists('video_external_url', $meta)
+        ) {
+            $requested = trim((string) ($meta['videoSourceType'] ?? ''));
+            $source = $requested === 'teams-link' ? 'teams-link' : 'html-mp4';
+            $meta['videoSourceType'] = $source;
+
+            $rawUrl = $meta['videoExternalUrl'] ?? $meta['video_external_url'] ?? null;
+            unset($meta['video_external_url']);
+            $url = $source === 'teams-link' ? self::normalizeExternalVideoUrl($rawUrl) : null;
+            if ($url === null) {
+                unset($meta['videoExternalUrl']);
+            } else {
+                $meta['videoExternalUrl'] = $url;
+            }
+        }
+
         return $meta;
+    }
+
+    public static function normalizeExternalVideoUrl(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $raw = trim($value);
+        if ($raw === '' || strlen($raw) > 4000 || ! str_starts_with(strtolower($raw), 'https://')) {
+            return null;
+        }
+
+        $parts = parse_url($raw);
+        if (! is_array($parts) || isset($parts['user']) || isset($parts['pass'])) {
+            return null;
+        }
+
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $allowed = $host === 'sharepoint.com'
+            || str_ends_with($host, '.sharepoint.com')
+            || $host === 'sharepoint.us'
+            || str_ends_with($host, '.sharepoint.us')
+            || $host === 'teams.microsoft.com'
+            || str_ends_with($host, '.teams.microsoft.com');
+
+        return $allowed ? $raw : null;
     }
 
     public static function normalizeWatermarkColor(mixed $value): ?string
