@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Api\Concerns\ResolvesLmsActor;
 use App\Http\Controllers\Controller;
 use App\Models\CmsMedia;
+use App\Services\R2VideoStorage;
+use App\Support\MediaHotlinkGuard;
 use App\Support\RangedFileResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -53,7 +55,9 @@ class CmsMediaUploadController extends Controller
             return response()->json(['message' => 'Media not found.'], 404);
         }
 
-        if ($media->disk && $media->path) {
+        if ($media->disk === 'r2') {
+            app(R2VideoStorage::class)->deleteObject($media->path);
+        } elseif ($media->disk && $media->path) {
             try {
                 if (Storage::disk($media->disk)->exists($media->path)) {
                     Storage::disk($media->disk)->delete($media->path);
@@ -63,11 +67,13 @@ class CmsMediaUploadController extends Controller
             }
         }
 
-        $filename = basename((string) ($media->filename ?: $media->path));
-        if ($filename !== '') {
-            $webPath = public_path('cms-videos/'.$filename);
-            if (is_file($webPath)) {
-                @unlink($webPath);
+        if ($media->disk !== 'r2') {
+            $filename = basename((string) ($media->filename ?: $media->path));
+            if ($filename !== '') {
+                $webPath = public_path('cms-videos/'.$filename);
+                if (is_file($webPath)) {
+                    @unlink($webPath);
+                }
             }
         }
 
@@ -76,7 +82,7 @@ class CmsMediaUploadController extends Controller
         return response()->json(['ok' => true]);
     }
 
-    public function file(string $publicId)
+    public function file(Request $request, string $publicId)
     {
         set_time_limit(0);
 
@@ -84,6 +90,17 @@ class CmsMediaUploadController extends Controller
 
         if ($media === null || ! $media->path) {
             abort(404, 'Media not found.');
+        }
+
+        if ($media->disk === 'r2') {
+            MediaHotlinkGuard::denyDirectOpen($request);
+            $signed = app(R2VideoStorage::class)->presignGet(
+                (string) $media->path,
+                (int) config('lms.video.playback_ttl', 28800),
+                (string) ($media->mime ?: 'video/mp4')
+            );
+
+            return redirect()->away($signed)->header('Cache-Control', 'private, no-store');
         }
 
         $filename = basename((string) ($media->filename ?: $media->path));

@@ -121,6 +121,11 @@ class LmsCurriculumDeleteService
         if ($path === '') {
             return;
         }
+        if (str_starts_with($path, 'r2:')) {
+            app(R2VideoStorage::class)->deleteObject(substr($path, 3));
+
+            return;
+        }
 
         foreach (['local', 'public'] as $disk) {
             try {

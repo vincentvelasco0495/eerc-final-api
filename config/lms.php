@@ -23,4 +23,17 @@ return [
         'playback_ttl' => (int) env('LMS_VIDEO_PLAYBACK_TTL', 28800),
     ],
 
+    /*
+    | Cloudflare R2 stores lesson videos. The browser uploads and plays the
+    | file directly. This API only signs those links. Leave the keys empty to
+    | keep uploads on this server.
+    */
+    'r2' => [
+        'account_id' => (string) env('R2_ACCOUNT_ID', ''),
+        'access_key_id' => (string) env('R2_ACCESS_KEY_ID', ''),
+        'secret_access_key' => (string) env('R2_SECRET_ACCESS_KEY', ''),
+        'bucket' => (string) env('R2_BUCKET', ''),
+        'endpoint' => (string) env('R2_ENDPOINT', ''),
+    ],
+
 ];

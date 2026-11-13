@@ -62,9 +62,116 @@ class LessonVideoUploadService
         return $this->statusPayload($meta);
     }
 
+    /**
+     * Start a direct multipart upload. The file bytes go to Cloudflare R2.
+     *
+     * @return array<string, mixed>
+     */
+    public function beginR2(User $user, array $payload): array
+    {
+        $r2 = app(R2VideoStorage::class);
+        if (! $r2->configured()) {
+            abort(409, 'Cloudflare R2 is not configured.');
+        }
+
+        $this->pruneStale();
+
+        $sizeBytes = (int) $payload['size_bytes'];
+        $maxBytes = (int) config('lms.video.max_bytes', 8 * 1024 * 1024 * 1024);
+        if ($sizeBytes < 1 || $sizeBytes > $maxBytes) {
+            abort(422, 'Video is empty or larger than the allowed upload size.');
+        }
+
+        $this->assertTarget(
+            (string) $payload['target_kind'],
+            (string) $payload['target_public_id'],
+            $payload['module_resource_public_id'] ?? null
+        );
+
+        $ext = strtolower(pathinfo((string) $payload['original_name'], PATHINFO_EXTENSION));
+        if ($ext === '' || strlen($ext) > 8 || ! preg_match('/^[a-z0-9]+$/', $ext)) {
+            $ext = 'mp4';
+        }
+        $folder = ((string) $payload['target_kind']) === 'cms' ? 'cms-videos' : 'lesson-videos';
+        $key = $folder.'/'.Str::uuid().'.'.$ext;
+        $mime = (string) ($payload['mime'] ?? 'video/mp4');
+        $created = $r2->createMultipartUpload($key, $mime);
+
+        $partSize = R2VideoStorage::PART_BYTES;
+        $partCount = (int) ceil($sizeBytes / $partSize);
+        if ($partCount < 1 || $partCount > 10000) {
+            $r2->abortMultipartUpload($key, $created['uploadId']);
+            abort(422, 'Video is empty or larger than the allowed upload size.');
+        }
+
+        $id = (string) Str::uuid();
+        $meta = [
+            'id' => $id,
+            'provider' => 'r2',
+            'r2_key' => $key,
+            'r2_upload_id' => $created['uploadId'],
+            'user_id' => (int) $user->id,
+            'original_name' => (string) $payload['original_name'],
+            'mime' => $mime,
+            'size_bytes' => $sizeBytes,
+            'chunk_size' => $partSize,
+            'part_size' => $partSize,
+            'total_chunks' => $partCount,
+            'part_count' => $partCount,
+            'received' => [],
+            'target_kind' => (string) $payload['target_kind'],
+            'target_public_id' => (string) $payload['target_public_id'],
+            'module_resource_public_id' => $payload['module_resource_public_id'] ?? null,
+            'created_at' => now()->toIso8601String(),
+        ];
+
+        Storage::disk('local')->makeDirectory($this->partsDir($id));
+        $this->writeMeta($id, $meta);
+
+        return array_merge($this->statusPayload($meta), [
+            'provider' => 'r2',
+            'partSize' => $partSize,
+            'partCount' => $partCount,
+            'receivedParts' => [],
+        ]);
+    }
+
+    public function presignR2Part(User $user, string $uploadId, int $partNumber): array
+    {
+        $meta = $this->loadOwnedMeta($user, $uploadId);
+        if (($meta['provider'] ?? '') !== 'r2') {
+            abort(404, 'Upload session not found.');
+        }
+        $partCount = (int) ($meta['part_count'] ?? 0);
+        if ($partNumber < 1 || $partNumber > $partCount) {
+            abort(422, 'Upload part is out of range.');
+        }
+
+        $url = app(R2VideoStorage::class)->presignPart(
+            (string) $meta['r2_key'],
+            (string) $meta['r2_upload_id'],
+            $partNumber
+        );
+
+        return ['partNumber' => $partNumber, 'url' => $url];
+    }
+
     public function status(User $user, string $uploadId): array
     {
-        return $this->statusPayload($this->loadOwnedMeta($user, $uploadId));
+        $meta = $this->loadOwnedMeta($user, $uploadId);
+        $payload = $this->statusPayload($meta);
+        if (($meta['provider'] ?? '') !== 'r2') {
+            return $payload;
+        }
+
+        $received = $this->r2ReceivedPartNumbers($meta);
+
+        return array_merge($payload, [
+            'provider' => 'r2',
+            'partSize' => (int) ($meta['part_size'] ?? 0),
+            'partCount' => (int) ($meta['part_count'] ?? 0),
+            'receivedParts' => $received,
+        ]);
     }
 
     public function storeChunk(User $user, string $uploadId, int $index, UploadedFile $chunk): array
@@ -72,6 +179,9 @@ class LessonVideoUploadService
         set_time_limit(0);
 
         $meta = $this->loadOwnedMeta($user, $uploadId);
+        if (($meta['provider'] ?? '') === 'r2') {
+            abort(409, 'This upload sends file parts directly to Cloudflare.');
+        }
         $total = (int) $meta['total_chunks'];
         $chunkSize = (int) $meta['chunk_size'];
         $sizeBytes = (int) $meta['size_bytes'];
@@ -115,6 +225,10 @@ class LessonVideoUploadService
         ignore_user_abort(true);
 
         $meta = $this->loadOwnedMeta($user, $uploadId);
+        if (($meta['provider'] ?? '') === 'r2') {
+            return $this->completeR2($user, $uploadId, $meta);
+        }
+
         $total = (int) $meta['total_chunks'];
         $received = array_map('intval', $meta['received'] ?? []);
         $missing = [];
@@ -168,9 +282,92 @@ class LessonVideoUploadService
         return $material->fresh();
     }
 
+    protected function completeR2(User $user, string $uploadId, array $meta): LessonMaterial|CmsMedia
+    {
+        $r2 = app(R2VideoStorage::class);
+        $key = (string) ($meta['r2_key'] ?? '');
+        $remoteId = (string) ($meta['r2_upload_id'] ?? '');
+        $target = $this->assertTarget(
+            (string) $meta['target_kind'],
+            (string) $meta['target_public_id'],
+            $meta['module_resource_public_id'] ?? null
+        );
+        $parts = $r2->listParts($key, $remoteId);
+        $expected = (int) ($meta['part_count'] ?? 0);
+        if ($expected < 1 || count($parts) !== $expected) {
+            abort(409, 'Upload is incomplete. Send the remaining parts, then try again.');
+        }
+
+        $r2->completeMultipartUpload($key, $remoteId, $parts);
+
+        if (($target['kind'] ?? '') === 'cms') {
+            $media = $this->completeR2Cms($user, $meta, $key);
+            $this->deleteSession($uploadId);
+
+            return $media;
+        }
+
+        $material = LessonMaterial::query()->create([
+            'public_id' => (string) Str::uuid(),
+            'module_id' => $target['module_id'],
+            'module_resource_id' => $target['module_resource_id'],
+            'assignment_id' => $target['assignment_id'],
+            'original_name' => (string) $meta['original_name'],
+            'storage_path' => 'r2:'.$key,
+            'mime' => (string) ($meta['mime'] ?? 'video/mp4'),
+            'size_bytes' => (int) $meta['size_bytes'],
+        ]);
+
+        $this->deleteSession($uploadId);
+        LmsCatalogService::bustUserAnalyticsCache($user->id);
+
+        return $material->fresh();
+    }
+
+    protected function completeR2Cms(User $user, array $meta, string $key): CmsMedia
+    {
+        $publicId = 'media-'.Str::lower((string) Str::ulid());
+
+        return CmsMedia::query()->create([
+            'public_id' => $publicId,
+            'uploaded_by' => $user->id > 0 ? $user->id : null,
+            'disk' => 'r2',
+            'path' => $key,
+            'url' => '/api/media/'.$publicId.'/file',
+            'filename' => (string) $meta['original_name'],
+            'original_name' => (string) $meta['original_name'],
+            'mime' => (string) ($meta['mime'] ?? 'video/mp4'),
+            'size_bytes' => (int) $meta['size_bytes'],
+            'alt' => null,
+        ])->fresh();
+    }
+
+    /**
+     * @return list<int>
+     */
+    protected function r2ReceivedPartNumbers(array $meta): array
+    {
+        try {
+            $parts = app(R2VideoStorage::class)->listParts(
+                (string) ($meta['r2_key'] ?? ''),
+                (string) ($meta['r2_upload_id'] ?? '')
+            );
+        } catch (\Throwable) {
+            return [];
+        }
+
+        return array_map(static fn (array $part) => (int) $part['PartNumber'], $parts);
+    }
+
     public function abort(User $user, string $uploadId): void
     {
-        $this->loadOwnedMeta($user, $uploadId);
+        $meta = $this->loadOwnedMeta($user, $uploadId);
+        if (($meta['provider'] ?? '') === 'r2') {
+            app(R2VideoStorage::class)->abortMultipartUpload(
+                $meta['r2_key'] ?? null,
+                $meta['r2_upload_id'] ?? null
+            );
+        }
         $cmsPartial = public_path('cms-videos/'.$uploadId.'.partial');
         if (is_file($cmsPartial)) {
             @unlink($cmsPartial);
@@ -443,6 +640,13 @@ class LessonVideoUploadService
             $mtime = Storage::disk('local')->lastModified($metaRel);
             if (is_int($mtime) && $mtime < $cutoff) {
                 $staleId = basename(str_replace('\\', '/', $dir));
+                $stale = json_decode((string) Storage::disk('local')->get($metaRel), true);
+                if (is_array($stale) && ($stale['provider'] ?? '') === 'r2') {
+                    app(R2VideoStorage::class)->abortMultipartUpload(
+                        $stale['r2_key'] ?? null,
+                        $stale['r2_upload_id'] ?? null
+                    );
+                }
                 $cmsPartial = public_path('cms-videos/'.$staleId.'.partial');
                 if (is_file($cmsPartial)) {
                     @unlink($cmsPartial);

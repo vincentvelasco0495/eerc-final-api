@@ -305,6 +305,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/lesson-materials/{publicId}', [LmsLessonMaterialController::class, 'destroy']);
 
     Route::post('/video-uploads', [LmsLessonVideoUploadController::class, 'store']);
+    Route::post('/video-uploads/r2', [LmsLessonVideoUploadController::class, 'r2']);
+    Route::post('/video-uploads/{uploadId}/parts', [LmsLessonVideoUploadController::class, 'presignPart']);
     Route::get('/video-uploads/{uploadId}', [LmsLessonVideoUploadController::class, 'show']);
     Route::post('/video-uploads/{uploadId}/chunks/{index}', [LmsLessonVideoUploadController::class, 'storeChunk'])
         ->whereNumber('index');

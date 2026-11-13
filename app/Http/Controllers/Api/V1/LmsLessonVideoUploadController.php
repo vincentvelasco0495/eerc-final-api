@@ -46,6 +46,53 @@ class LmsLessonVideoUploadController extends Controller
         return response()->json(['data' => $status], 201);
     }
 
+    public function r2(Request $request, LessonVideoUploadService $uploads): JsonResponse
+    {
+        $actor = $this->lmsActor();
+        if ($actor->id <= 0) {
+            abort(401, 'Authentication required.');
+        }
+
+        $validated = $request->validate([
+            'originalName' => ['required', 'string', 'max:255'],
+            'sizeBytes' => ['required', 'integer', 'min:1'],
+            'mime' => ['sometimes', 'nullable', 'string', 'max:128'],
+            'targetKind' => ['required', 'in:module,standalone,assignment,cms'],
+            'targetPublicId' => ['required', 'string', 'max:64'],
+            'moduleResourcePublicId' => ['sometimes', 'nullable', 'string', 'max:64'],
+        ]);
+
+        $status = $uploads->beginR2($actor, [
+            'original_name' => $validated['originalName'],
+            'size_bytes' => $validated['sizeBytes'],
+            'mime' => $validated['mime'] ?? 'video/mp4',
+            'target_kind' => $validated['targetKind'],
+            'target_public_id' => $validated['targetPublicId'],
+            'module_resource_public_id' => $validated['moduleResourcePublicId'] ?? null,
+        ]);
+
+        return response()->json(['data' => $status], 201);
+    }
+
+    public function presignPart(
+        Request $request,
+        string $uploadId,
+        LessonVideoUploadService $uploads
+    ): JsonResponse {
+        $actor = $this->lmsActor();
+        if ($actor->id <= 0) {
+            abort(401, 'Authentication required.');
+        }
+
+        $validated = $request->validate([
+            'partNumber' => ['required', 'integer', 'min:1', 'max:10000'],
+        ]);
+
+        return response()->json([
+            'data' => $uploads->presignR2Part($actor, $uploadId, (int) $validated['partNumber']),
+        ]);
+    }
+
     public function show(string $uploadId, LessonVideoUploadService $uploads): JsonResponse
     {
         $actor = $this->lmsActor();
@@ -99,6 +146,7 @@ class LmsLessonVideoUploadController extends Controller
                     'size' => (int) $result->size_bytes,
                     'alt' => $result->alt,
                     'kind' => 'cms',
+                    'provider' => $result->disk === 'r2' ? 'r2' : null,
                 ],
             ], 201);
         }

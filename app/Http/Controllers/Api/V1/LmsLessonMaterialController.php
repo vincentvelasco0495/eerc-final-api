@@ -9,10 +9,12 @@ use App\Models\LessonMaterial;
 use App\Models\Module;
 use App\Models\ModuleResource;
 use App\Services\LmsCatalogService;
+use App\Services\R2VideoStorage;
 use App\Support\LessonPlaybackToken;
 use App\Support\MediaHotlinkGuard;
 use App\Support\RangedFileResponse;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -91,11 +93,16 @@ class LmsLessonMaterialController extends Controller
             return response()->json(['ok' => true]);
         }
 
-        if (Storage::disk('public')->exists($row->storage_path)) {
-            Storage::disk('public')->delete($row->storage_path);
-        }
-        if (Storage::disk('local')->exists($row->storage_path)) {
-            Storage::disk('local')->delete($row->storage_path);
+        $storagePath = (string) $row->storage_path;
+        if (str_starts_with($storagePath, 'r2:')) {
+            app(R2VideoStorage::class)->deleteObject(substr($storagePath, 3));
+        } else {
+            if (Storage::disk('public')->exists($storagePath)) {
+                Storage::disk('public')->delete($storagePath);
+            }
+            if (Storage::disk('local')->exists($storagePath)) {
+                Storage::disk('local')->delete($storagePath);
+            }
         }
 
         $row->delete();
@@ -133,14 +140,14 @@ class LmsLessonMaterialController extends Controller
                 'path' => $path,
                 'expiresAt' => now()->addSeconds($ttl)->toIso8601String(),
             ],
-        ]);
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     /**
      * Stream lesson material bytes.
      * Videos require a playback token and cannot be opened as a document URL.
      */
-    public function download(Request $request, string $publicId): BinaryFileResponse|\Illuminate\Http\Response
+    public function download(Request $request, string $publicId): BinaryFileResponse|\Illuminate\Http\Response|RedirectResponse
     {
         $row = LessonMaterial::query()->where('public_id', $publicId)->first();
 
@@ -156,6 +163,17 @@ class LmsLessonMaterialController extends Controller
         if ($isVideo) {
             MediaHotlinkGuard::denyDirectOpen($request);
             LessonPlaybackToken::assertValid($request->query('play'), $publicId);
+        }
+
+        $storagePath = (string) $row->storage_path;
+        if (str_starts_with($storagePath, 'r2:')) {
+            $signed = app(R2VideoStorage::class)->presignGet(
+                substr($storagePath, 3),
+                (int) config('lms.video.playback_ttl', 28800),
+                $mime
+            );
+
+            return redirect()->away($signed)->header('Cache-Control', 'private, no-store');
         }
 
         $disk = Storage::disk('local')->exists($row->storage_path)
